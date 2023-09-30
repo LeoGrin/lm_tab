@@ -3,7 +3,42 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 
+#taken from skrub
+def _replace_false_missing(df: pd.DataFrame | pd.Series) -> pd.DataFrame | pd.Series:
+    """
+    Takes a DataFrame or a Series, and replaces the "false missing", that is,
+    strings that designate a missing value, but do not have the corresponding
+    type. We convert these strings to np.nan.
+    Also replaces `None` to np.nan.
+    """
+    # Should not replace "missing" (the string used for imputation in
+    # categorical features).
+    STR_NA_VALUES = [
+        "null",
+        "",
+        "1.#QNAN",
+        "#NA",
+        "nan",
+        "#N/A N/A",
+        "-1.#QNAN",
+        "<NA>",
+        "-1.#IND",
+        "-nan",
+        "n/a",
+        "-NaN",
+        "1.#IND",
+        "NULL",
+        "NA",
+        "N/A",
+        "#N/A",
+        "NaN",
+    ]  # taken from pandas.io.parsers (version 1.1.4)
+    df = df.replace(STR_NA_VALUES + [None, "?", "..."], np.nan)
+    df = df.replace(r"^\s+$", np.nan, regex=True)  # Replace whitespaces
+    return df
+
 def remove_missing_values(X, y, threshold=0.7):
+    X = _replace_false_missing(X)
     """Remove columns where most values are missing, then remove any row with missing values"""
     missing_cols_mask = pd.isnull(X).mean(axis=0) > threshold
     print("Removed {} columns with missing values on {} columns".format(sum(missing_cols_mask), X.shape[1]))
