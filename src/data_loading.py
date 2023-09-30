@@ -13,6 +13,7 @@ def remove_missing_values(X, y, threshold=0.7):
     X = X[~missing_rows_mask]
     y = y[~missing_rows_mask]
     res = (X, y, missing_cols_mask, missing_rows_mask)
+    return res
 
 
 default_column = {"employee_salary": "employee_position_title",
