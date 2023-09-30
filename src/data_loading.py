@@ -12,7 +12,7 @@ skrub_functions = {"employee_salary": fetch_employee_salaries,
                      "drug_directory": fetch_drug_directory
 }
 
-def load_data(data_name, max_rows=None):
+def load_data(data_name, max_rows=None, include_all_columns=False):
     # load the data
     if data_name in skrub_functions.keys():
         ds = skrub_functions[data_name]()
@@ -51,6 +51,10 @@ def load_data(data_name, max_rows=None):
     y = le.fit_transform(y)
     y = y.astype(np.int64) # for skorch
     
-    
-    return X[default_col], y
+    X_text = X[default_col]
+    X_rest = X.drop(default_col, axis=1)
+    if include_all_columns:
+        return X_text, X_rest, y
+    else:
+        return X_text, y
 

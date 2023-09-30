@@ -28,6 +28,9 @@ class FeaturesExtractor(BaseEstimator, TransformerMixin):
         elif self.method == "biggest_variance":
             indices = np.argsort(np.var(X, axis=0))[-self.n_features:]
             res = X[:, indices]
+        elif self.method == "smallest_variance":
+            indices = np.argsort(np.var(X, axis=0))[:self.n_features]
+            res = X[:, indices]
         
         assert res.shape == (X.shape[0], self.n_features)
         return res

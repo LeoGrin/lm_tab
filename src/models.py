@@ -21,7 +21,6 @@ class BertAndTabPFN(nn.Module):
             self.linear_translator = nn.Linear(768, dim_tabpfn)
     
     def forward(self, input_ids, attention_mask, y, tabular_data=None, single_eval_pos=100, **fit_params):
-        print("fit_params", fit_params)
         bert_outputs = self.bert(input_ids, attention_mask=attention_mask)
         bert_embeddings = bert_outputs.last_hidden_state[:, 0, :]
         if hasattr(self, 'linear_translator'):
