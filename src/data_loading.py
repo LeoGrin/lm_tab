@@ -47,6 +47,8 @@ def remove_missing_values(X, y, threshold=0.7):
     print("Removed {} rows with missing values on {} rows".format(sum(missing_rows_mask), X.shape[0]))
     X = X[~missing_rows_mask]
     y = y[~missing_rows_mask]
+    # reset index
+    X = X.reset_index(drop=True)
     res = (X, y, missing_cols_mask, missing_rows_mask)
     return res
 
@@ -83,6 +85,15 @@ def load_data(data_name, max_rows=None, include_all_columns=False, remove_missin
         y = y > np.median(y)
 
     assert len(np.unique(y)) < min(20, len(y)), "probably a problem with y"
+    
+    X_text = X[default_col]
+    X_rest = X.drop(default_col, axis=1)
+    if remove_missing:
+        X_rest, y, missing_cols_mask, missing_rows_mask = remove_missing_values(X_rest, y)
+        X_text = X_text[~missing_rows_mask]
+        print("Removed {} rows with missing values on {} rows".format(sum(missing_rows_mask), X.shape[0]))
+        print("Removed {} columns with missing values on {} columns".format(sum(missing_cols_mask), X.shape[1] - 1))
+        print("New shape: {}".format(X_rest.shape))
 
     if max_rows is not None:
         # shuffle the data
@@ -93,20 +104,12 @@ def load_data(data_name, max_rows=None, include_all_columns=False, remove_missin
         y = y.iloc[indices]
         X = X[:max_rows]
         y = y[:max_rows]
-    
+
     # label encode the target
     le = LabelEncoder()
     y = le.fit_transform(y)
     y = y.astype(np.int64) # for skorch
-    
-    X_text = X[default_col]
-    X_rest = X.drop(default_col, axis=1)
-    if remove_missing:
-        X_rest, y, missing_cols_mask, missing_rows_mask = remove_missing_values(X_rest, y)
-        X_text = X_text[~missing_rows_mask]
-        print("Removed {} rows with missing values on {} rows".format(sum(missing_rows_mask), X.shape[0]))
-        print("Removed {} columns with missing values on {} columns".format(sum(missing_cols_mask), X.shape[1] - 1))
-        print("New shape: {}".format(X_rest.shape))
+
     if include_all_columns:
         return X_text, X_rest, y
     else:
