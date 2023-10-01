@@ -98,17 +98,22 @@ def load_data(data_name, max_rows=None, include_all_columns=False, remove_missin
     if max_rows is not None:
         # shuffle the data
         rng = np.random.default_rng(42)
-        indices = np.arange(len(X))
+        indices = np.arange(len(X_rest))
         rng.shuffle(indices)
-        X = X.iloc[indices]
+        X_rest = X_rest.iloc[indices]
         y = y.iloc[indices]
-        X = X[:max_rows]
+        X_text = X_text.iloc[indices]
+        X_rest = X_rest[:max_rows]
         y = y[:max_rows]
+        X_text = X_text[:max_rows]
 
     # label encode the target
     le = LabelEncoder()
     y = le.fit_transform(y)
     y = y.astype(np.int64) # for skorch
+
+    # print shapes
+    print(f"X_text shape: {X_text.shape}, X_rest shape: {X_rest.shape}, y shape: {y.shape}")
 
     if include_all_columns:
         return X_text, X_rest, y

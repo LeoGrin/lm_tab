@@ -3,8 +3,12 @@ import numpy as np
 from tabpfn import TabPFNClassifier
 from tabpfn.utils import normalize_data, to_ranking_low_mem, remove_outliers
 from tabpfn.utils import NOP, normalize_by_used_features_f
-from sklearn.preprocessing import PowerTransformer, QuantileTransformer, RobustScaler
+from sklearn.preprocessing import PowerTransformer, QuantileTransformer, RobustScaler, StandardScaler, OrdinalEncoder, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.model_selection import cross_val_score
 import torch
+from skrub import TableVectorizer, MinHashEncoder
 
 class FeaturesExtractor(BaseEstimator, TransformerMixin):
     def __init__(self, n_features=1, method="first"):
@@ -34,6 +38,7 @@ class FeaturesExtractor(BaseEstimator, TransformerMixin):
         
         assert res.shape == (X.shape[0], self.n_features)
         return res
+
     
 
 from sklearn.model_selection import BaseCrossValidator
@@ -79,6 +84,8 @@ class FixedSizeSplit(BaseCrossValidator):
             yield train, test
 
 
+#Taken from TabPFNClassifier
+#used to preprocess the data before feeding it to the tabpfn
 def preprocess_input(eval_xs, eval_ys, eval_position, device, preprocess_transform="none",
                      max_features=100, normalize_with_sqrt=False, normalize_with_test=False,
                      normalize_to_ranking=False, categorical_feats=[]):
@@ -129,6 +136,76 @@ def preprocess_input(eval_xs, eval_ys, eval_position, device, preprocess_transfo
 
     return eval_xs.to(device)
 
+
+def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, model_name, model, encoding):
+    """
+    X_enc: np array of shape (n_samples, embedding_dim), the embedded texts
+    X_rest: np array of shape (n_samples, n_features), additional tabular data
+    y: np array of shape (n_samples,), the classifcation target
+    dim_reduction_name: str, the name of the dim reduction method
+    dim_reduction: sklearn transformer, the dim reduction method
+    model_name: str, the name of the model
+    model: sklearn model, the model
+    encoding: str, the name of the encoding which was used to create X_enc
+    """
+    assert model_name in ["TabPFNClassifier", "LogisticRegression", "GradientBoostingClassifier"]
+    assert encoding.startswith("lm__") or encoding.startswith("skrub__")
+    if X_rest is not None:
+        #TODO: make this cleaner
+        # we want to eliminate certain combinations
+        # passthrough and lm__ means taking the full lm embedding, which is slow if the model is not LogisticRegression
+        # for skrub encodings, we don't want to use passthrough
+        if dim_reduction_name == "passthrough" and model_name != "LogisticRegression" and not encoding.startswith("skrub"):
+            return None
+        if dim_reduction_name != "passthrough" and encoding.startswith("skrub"):
+            return None
+        # encode X_rest with the TableVectorizer
+        if model_name == "TabPFNClassifier":
+            # ordinal encoding for low_cardinality columns
+            low_card_cat_transformer = OrdinalEncoder()
+        else:
+            low_card_cat_transformer = OneHotEncoder(handle_unknown="ignore")
+        if model_name == "LogisticRegression":
+            numerical_transformer = StandardScaler()
+        else:
+            numerical_transformer = "passthrough"
+        
+        rest_trans = TableVectorizer(high_card_cat_transformer = MinHashEncoder(n_components=10),
+                                    low_card_cat_transformer = low_card_cat_transformer,
+                                    numerical_transformer=numerical_transformer,
+                                    cardinality_threshold=10)
+    if X_rest is not None and X_enc is not None:
+        
+        # Assuming X_enc and X_rest are numpy arrays, you can get their shapes
+        n_enc_columns = X_enc.shape[1]
+        n_rest_columns = X_rest.shape[1]
+
+        # Create column indices for X_enc and X_rest
+        enc_indices = np.arange(n_enc_columns)
+        rest_indices = np.arange(n_enc_columns, n_enc_columns + n_rest_columns)
+
+        # Create the ColumnTransformer
+        complete_trans = ColumnTransformer(
+            transformers=[
+                ('dim_reduction', dim_reduction, enc_indices),  # Apply dimensionality reduction to X_enc
+                ('rest_trans', rest_trans, rest_indices)  # Apply TableVectorizer to X_rest
+            ])
+        
+
+        full_X = np.concatenate([X_enc, X_rest], axis=1)
+        print(X_enc.shape, X_rest.shape, full_X.shape)
+        print(complete_trans.fit_transform(full_X).shape)
+    elif X_rest is not None:
+        complete_trans = rest_trans
+        full_X = X_rest
+    else:
+        complete_trans = dim_reduction
+        full_X = X_enc
+
+
+    pipeline = Pipeline([("encoding", complete_trans), ("model", model)])
+    scores = cross_val_score(pipeline, full_X, y, scoring="accuracy", cv=cv)
+    return scores
 
 
 # Not used rn
