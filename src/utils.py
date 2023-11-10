@@ -200,6 +200,12 @@ def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, mod
         # Create column indices for X_enc and X_rest
         enc_indices = np.arange(n_enc_columns)
         rest_indices = np.arange(n_enc_columns, n_enc_columns + n_rest_columns)
+        #check
+        all_indices = np.concatenate(encoded_columns_indices + [rest_indices])
+        # assert no duplicates
+        assert len(all_indices) == len(np.unique(all_indices))
+        # assert we have all indices
+        assert set(all_indices) == set(np.arange(n_enc_columns + n_rest_columns))
 
         # Create the ColumnTransformer
         #TODO: test this
@@ -207,6 +213,7 @@ def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, mod
         for i in range(len(original_column_names)):
             transformers.append((f"dim_reduction_{i}", dim_reduction if isinstance(dim_reduction, str) else clone(dim_reduction), encoded_columns_indices[i]))
         transformers.append(('rest_trans', rest_trans, rest_indices))
+        print(transformers)
         complete_trans = ColumnTransformer(
             transformers=transformers,
         )
