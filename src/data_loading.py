@@ -1,4 +1,4 @@
-from skrub.datasets import fetch_employee_salaries, fetch_drug_directory
+from skrub.datasets import fetch_employee_salaries, fetch_drug_directory, fetch_medical_charge, fetch_road_safety, fetch_traffic_violations
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
@@ -52,17 +52,41 @@ def remove_missing_values(X, y, threshold=0.7):
     res = (X, y, missing_cols_mask, missing_rows_mask)
     return res
 
+def balance(x_train, x_test, y_train, y_test, rng):
+    indices_train = [(y_train == 0), (y_train == 1)]
+    max_class = np.argmax(list(map(sum, indices_train)))
+    min_class = np.argmin(list(map(sum, indices_train)))
+    n_samples_min_class = sum(indices_train[min_class])
+    indices_max_class = rng.choice(np.where(indices_train[max_class])[0], n_samples_min_class, replace=False)
+    indices_min_class = np.where(indices_train[min_class])[0]
+    total_indices_train = np.concatenate((indices_max_class, indices_min_class))
+
+    indices_test = [(y_train == 0), (y_train == 1)]
+    max_class = np.argmax(list(map(sum, indices_test)))
+    min_class = np.argmin(list(map(sum, indices_test)))
+    n_samples_min_class = sum(indices_test[min_class])
+    indices_max_class = rng.choice(np.where(indices_test[max_class])[0], n_samples_min_class, replace=False)
+    indices_min_class = np.where(indices_test[min_class])[0]
+    total_indices_test = np.concatenate((indices_max_class, indices_min_class))
+    return x_train[total_indices_train], x_test[total_indices_test], y_train[total_indices_train], y_test[
+        total_indices_test]
+
 
 default_column = {"employee_salary": "employee_position_title",
-                    "drug_directory": "SUBSTANCENAME",
+                    "drug_directory": "NONPROPRIETARYNAME",
+                    "medical_charge": "Provider_Name",
+                    "traffic_violations": "description",
                     #"readability": "excerpt",
                     }
 
 skrub_functions = {"employee_salary": fetch_employee_salaries,
-                     "drug_directory": fetch_drug_directory
+                     "drug_directory": fetch_drug_directory,
+                     "medical_charge": fetch_medical_charge,
+                     "traffic_violations": fetch_traffic_violations,
 }
 
-def load_data(data_name, max_rows=None, include_all_columns=False, remove_missing=True):
+def load_data(data_name, max_rows=None, include_all_columns=False, remove_missing=True, regression=False):
+    rng = np.random.default_rng(42)
     # load the data
     if data_name in skrub_functions.keys():
         ds = skrub_functions[data_name]()
@@ -77,17 +101,13 @@ def load_data(data_name, max_rows=None, include_all_columns=False, remove_missin
     else:
         default_col = "name"
 
-    # infer task
-    task = "classification" if len(np.unique(y)) < 20 else "regression"
-    print(f"Original task: {task} for {data_name}")
-    if task == "regression":
-        print("Converting to binary classification")
-        y = y > np.median(y)
-
-    assert len(np.unique(y)) < min(20, len(y)), "probably a problem with y"
-    
     X_text = X[default_col]
     X_rest = X.drop(default_col, axis=1)
+    # remove missing in y
+    indices = pd.isnull(y)
+    y = y[~indices]
+    X_text = X_text[~indices]
+    X_rest = X_rest[~indices]
     if remove_missing:
         X_rest, y, missing_cols_mask, missing_rows_mask = remove_missing_values(X_rest, y)
         X_text = X_text[~missing_rows_mask]
@@ -95,22 +115,46 @@ def load_data(data_name, max_rows=None, include_all_columns=False, remove_missin
         print("Removed {} columns with missing values on {} columns".format(sum(missing_cols_mask), X.shape[1] - 1))
         print("New shape: {}".format(X_rest.shape))
 
+    # infer task
+    task = "classification" if len(np.unique(y)) <= 20 else "regression"
+    print(f"Original task: {task} for {data_name}")
+    if task == "regression":
+        if not regression:
+            print("Converting to binary classification")
+            y = y > np.median(y)
+    if not regression:
+        # label encode the target
+        le = LabelEncoder()
+        y = le.fit_transform(y)
+        y = y.astype(np.int64) # for skorch
+        if len(np.unique(y)) > 2:
+            print("More than 2 classes, converting to binary classification")
+
+    if regression:
+        # convert y to numpy
+        y = y.to_numpy()
+        y = y.astype(np.float32)
+        
+
+
+    assert (len(np.unique(y)) < min(20, len(y))) or regression, "probably a problem with y"
+    if not regression:
+        print("Classes", np.unique(y, return_counts=True))
+    
+
+
     if max_rows is not None:
         # shuffle the data
-        rng = np.random.default_rng(42)
         indices = np.arange(len(X_rest))
         rng.shuffle(indices)
         X_rest = X_rest.iloc[indices]
-        y = y.iloc[indices]
+        y = y[indices]
         X_text = X_text.iloc[indices]
         X_rest = X_rest[:max_rows]
         y = y[:max_rows]
         X_text = X_text[:max_rows]
 
-    # label encode the target
-    le = LabelEncoder()
-    y = le.fit_transform(y)
-    y = y.astype(np.int64) # for skorch
+
 
     # print shapes
     print(f"X_text shape: {X_text.shape}, X_rest shape: {X_rest.shape}, y shape: {y.shape}")

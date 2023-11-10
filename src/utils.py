@@ -6,7 +6,7 @@ from tabpfn.utils import NOP, normalize_by_used_features_f
 from sklearn.preprocessing import PowerTransformer, QuantileTransformer, RobustScaler, StandardScaler, OrdinalEncoder, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, cross_validate
 import torch
 from skrub import TableVectorizer, MinHashEncoder
 
@@ -137,7 +137,8 @@ def preprocess_input(eval_xs, eval_ys, eval_position, device, preprocess_transfo
     return eval_xs.to(device)
 
 
-def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, model_name, model, encoding):
+def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, model_name, model, encoding,
+                        cv, regression=False, **kwargs):
     """
     X_enc: np array of shape (n_samples, embedding_dim), the embedded texts
     X_rest: np array of shape (n_samples, n_features), additional tabular data
@@ -147,30 +148,35 @@ def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, mod
     model_name: str, the name of the model
     model: sklearn model, the model
     encoding: str, the name of the encoding which was used to create X_enc
+    cv: sklearn cross validator, the cross validator to use
+    regression: bool, whether to use regression or classification, default False
     """
-    assert model_name in ["TabPFNClassifier", "LogisticRegression", "GradientBoostingClassifier"]
-    assert encoding.startswith("lm__") or encoding.startswith("skrub__")
+    assert model_name in ["TabPFNClassifier", "TabPFNClassifier_basic", "LogisticRegression", "GradientBoostingClassifier", "GradientBoostingRegressor", "LinearRegression"]
+    assert encoding.startswith("lm__") or encoding.startswith("skrub__") or encoding.startswith("bert_custom__") or encoding.startswith("openai__") or encoding.startswith("bert_custom_pooling__")
+    #TODO: make this cleaner
+    # we want to eliminate certain combinations
+    # passthrough and lm__ means taking the full lm embedding, which is slow if the model is not LogisticRegression
+    # for skrub encodings, we don't want to use passthrough
+    if dim_reduction_name == "passthrough" and not (model_name in ["LogisticRegression", "LinearRegression"]) and not encoding.startswith("skrub"):
+        print("Skipping {} with {} and {}".format(model_name, dim_reduction_name, encoding))
+        return None
+    if dim_reduction_name != "passthrough" and encoding.startswith("skrub"):
+        print("Skipping {} with {} and {}".format(model_name, dim_reduction_name, encoding))
+        return None
+    print("Running {} with {} and {}".format(model_name, dim_reduction_name, encoding))
     if X_rest is not None:
-        #TODO: make this cleaner
-        # we want to eliminate certain combinations
-        # passthrough and lm__ means taking the full lm embedding, which is slow if the model is not LogisticRegression
-        # for skrub encodings, we don't want to use passthrough
-        if dim_reduction_name == "passthrough" and model_name != "LogisticRegression" and not encoding.startswith("skrub"):
-            return None
-        if dim_reduction_name != "passthrough" and encoding.startswith("skrub"):
-            return None
         # encode X_rest with the TableVectorizer
-        if model_name == "TabPFNClassifier":
+        if model_name.startswith("TabPFNClassifier"):
             # ordinal encoding for low_cardinality columns
-            low_card_cat_transformer = OrdinalEncoder()
+            low_card_cat_transformer = OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)
         else:
             low_card_cat_transformer = OneHotEncoder(handle_unknown="ignore")
-        if model_name == "LogisticRegression":
+        if model_name.startswith("LogisticRegression"):
             numerical_transformer = StandardScaler()
         else:
             numerical_transformer = "passthrough"
         
-        rest_trans = TableVectorizer(high_card_cat_transformer = MinHashEncoder(n_components=10),
+        rest_trans = TableVectorizer(high_card_cat_transformer = MinHashEncoder(n_components=10, analyzer='char'),
                                     low_card_cat_transformer = low_card_cat_transformer,
                                     numerical_transformer=numerical_transformer,
                                     cardinality_threshold=10)
@@ -204,8 +210,86 @@ def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, mod
 
 
     pipeline = Pipeline([("encoding", complete_trans), ("model", model)])
-    scores = cross_val_score(pipeline, full_X, y, scoring="accuracy", cv=cv)
-    return scores
+    #scores = cross_val_score(pipeline, full_X, y, scoring="accuracy", cv=cv)
+    # report both accuracy and roc_auc
+    if regression:
+        scores = cross_validate(pipeline, full_X, y, scoring=["neg_mean_squared_error", "r2"], cv=cv)
+    else:
+        scores = cross_validate(pipeline, full_X, y, scoring=["accuracy", "roc_auc_ovr"], cv=cv)
+
+    try:
+        n_train = cv.n_train
+        n_test = cv.n_test
+    except:
+        n_train = np.nan
+        n_test = np.nan
+    res =  {
+        'encoding': encoding,
+        'dim_reduction': dim_reduction_name,
+        'model': model_name,
+        #'accuracies': scores['test_accuracy'],
+        #'roc_auc': scores['test_roc_auc_ovr'],
+        'n_train': n_train,
+        'n_test': n_test,
+        **kwargs
+    }
+    # add the scores
+    if regression:
+        res['neg_mean_squared_error'] = scores['test_neg_mean_squared_error']
+        res['r2'] = scores['test_r2']
+    else:
+        res['accuracies'] = scores['test_accuracy']
+        res['roc_auc'] = scores['test_roc_auc_ovr']
+    
+    return res
+
+def run_catboost(X_text, X_rest, y,
+                        cv, **kwargs):
+    """
+    X_text: np array of shape (n_samples, 1), the text feature
+    X_rest: np array of shape (n_samples, n_features), additional tabular data
+    y: np array of shape (n_samples,), the classifcation target
+    dim_reduction_name: str, the name of the dim reduction method
+    dim_reduction: sklearn transformer, the dim reduction method
+    model_name: str, the name of the model
+    model: sklearn model, the model
+    encoding: str, the name of the encoding which was used to create X_enc
+    cv: sklearn cross validator, the cross validator to use
+    """
+
+    if X_rest is not None:
+        rest_trans = TableVectorizer(high_card_cat_transformer = MinHashEncoder(n_components=10, analyzer="char"),
+                                    low_card_cat_transformer = OneHotEncoder(handle_unknown="ignore"),
+                                    numerical_transformer=StandardScaler(),
+                                    cardinality_threshold=10)
+        rest_trans.fit(X_rest)
+        # find the categorical features
+        cat_cols = []
+        for trans, name, cols in rest_trans.transformers:
+            if name == "low_card_cat_transformer":
+                cat_cols.extend(cols)
+            if name == "high_card_cat_transformer":
+                cat_cols.extend(cols)
+        print("cat_cols", cat_cols)
+
+
+
+
+    # pipeline = Pipeline([("encoding", complete_trans), ("model", model)])
+    # #scores = cross_val_score(pipeline, full_X, y, scoring="accuracy", cv=cv)
+    # # report both accuracy and roc_auc
+    # scores = cross_validate(pipeline, full_X, y, scoring=["accuracy", "roc_auc_ovr"], cv=cv)
+    # return {
+    #     'encoding': encoding,
+    #     'dim_reduction': dim_reduction_name,
+    #     'model': model_name,
+    #     'accuracies': scores['test_accuracy'],
+    #     'roc_auc': scores['test_roc_auc_ovr'],
+    #     'n_train': cv.n_train,
+    #     'n_test': cv.n_test,
+    #     **kwargs
+    # }
+
 
 
 # Not used rn
