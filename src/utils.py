@@ -7,6 +7,7 @@ from sklearn.preprocessing import PowerTransformer, QuantileTransformer, RobustS
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import cross_val_score, cross_validate
+from sklearn.base import clone
 import torch
 from skrub import TableVectorizer, MinHashEncoder
 
@@ -179,11 +180,21 @@ def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, mod
         rest_trans = TableVectorizer(high_card_cat_transformer = MinHashEncoder(n_components=10, analyzer='char'),
                                     low_card_cat_transformer = low_card_cat_transformer,
                                     numerical_transformer=numerical_transformer,
-                                    cardinality_threshold=10)
+                                    cardinality_threshold=30)
     if X_rest is not None and X_enc is not None:
         
         # Assuming X_enc and X_rest are numpy arrays, you can get their shapes
         n_enc_columns = X_enc.shape[1]
+        # names of the columns should be of format original_column_name__index
+        assert all(["__" in col for col in X_enc.columns])
+        original_column_names = np.unique([col.split("__")[0] for col in X_enc.columns])
+        # get the indices of the columns for each original column
+        encoded_columns_indices = []
+        for col in original_column_names:
+            indices = [i for i, c in enumerate(X_enc.columns) if c.startswith(col)]
+            encoded_columns_indices.append(indices)
+        print(encoded_columns_indices)
+        print(len(encoded_columns_indices))
         n_rest_columns = X_rest.shape[1]
 
         # Create column indices for X_enc and X_rest
@@ -191,11 +202,14 @@ def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, mod
         rest_indices = np.arange(n_enc_columns, n_enc_columns + n_rest_columns)
 
         # Create the ColumnTransformer
+        #TODO: test this
+        transformers = []
+        for i in range(len(original_column_names)):
+            transformers.append((f"dim_reduction_{i}", dim_reduction if isinstance(dim_reduction, str) else clone(dim_reduction), encoded_columns_indices[i]))
+        transformers.append(('rest_trans', rest_trans, rest_indices))
         complete_trans = ColumnTransformer(
-            transformers=[
-                ('dim_reduction', dim_reduction, enc_indices),  # Apply dimensionality reduction to X_enc
-                ('rest_trans', rest_trans, rest_indices)  # Apply TableVectorizer to X_rest
-            ])
+            transformers=transformers,
+        )
         
 
         full_X = np.concatenate([X_enc, X_rest], axis=1)

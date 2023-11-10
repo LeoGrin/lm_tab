@@ -85,7 +85,7 @@ skrub_functions = {"employee_salary": fetch_employee_salaries,
                      "traffic_violations": fetch_traffic_violations,
 }
 
-def load_data(data_name, max_rows=None, include_all_columns=False, remove_missing=True, regression=False):
+def load_data_1_text(data_name, max_rows=None, include_all_columns=False, remove_missing=True, regression=False):
     rng = np.random.default_rng(42)
     # load the data
     if data_name in skrub_functions.keys():
@@ -163,4 +163,70 @@ def load_data(data_name, max_rows=None, include_all_columns=False, remove_missin
         return X_text, X_rest, y
     else:
         return X_text, y
+
+def load_data(data_name, max_rows=None, remove_missing=True, regression=False):
+    rng = np.random.default_rng(42)
+    # load the data
+    if data_name in skrub_functions.keys():
+        ds = skrub_functions[data_name]()
+        X, y = ds.X, ds.y
+    else:
+        df = pd.read_parquet("../data/{}.parquet".format(data_name)) #FIXME
+        X = df.drop("target", axis=1)
+        y = df["target"]
+
+
+    # remove missing in y
+    indices = pd.isnull(y)
+    y = y[~indices]
+    X = X[~indices]
+    if remove_missing:
+        X, y, missing_cols_mask, missing_rows_mask = remove_missing_values(X, y)
+        print("Removed {} rows with missing values on {} rows".format(sum(missing_rows_mask), X.shape[0]))
+        print("Removed {} columns with missing values on {} columns".format(sum(missing_cols_mask), X.shape[1] - 1))
+        print("New shape: {}".format(X.shape))
+
+    # infer task
+    task = "classification" if len(np.unique(y)) <= 20 else "regression"
+    print(f"Original task: {task} for {data_name}")
+    if task == "regression":
+        if not regression:
+            print("Converting to binary classification")
+            y = y > np.median(y)
+    if not regression:
+        # label encode the target
+        le = LabelEncoder()
+        y = le.fit_transform(y)
+        y = y.astype(np.int64) # for skorch
+        if len(np.unique(y)) > 2:
+            print("More than 2 classes, converting to binary classification")
+
+    if regression:
+        # convert y to numpy
+        y = y.to_numpy()
+        y = y.astype(np.float32)
+        
+
+
+    assert (len(np.unique(y)) < min(20, len(y))) or regression, "probably a problem with y"
+    if not regression:
+        print("Classes", np.unique(y, return_counts=True))
+    
+
+
+    if max_rows is not None:
+        # shuffle the data
+        indices = np.arange(len(X))
+        rng.shuffle(indices)
+        X = X.iloc[indices]
+        y = y[indices]
+        X = X[:max_rows]
+        y = y[:max_rows]
+
+
+
+    # print shapes
+    print(f"X shape: {X.shape}, y shape: {y.shape}")
+
+    return X, y
 

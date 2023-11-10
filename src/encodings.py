@@ -6,7 +6,7 @@ from src.utils import preprocess_input
 from transformers import BertModel, BertTokenizer, AutoTokenizer
 from sentence_transformers import SentenceTransformer
 import numpy as np
-from skrub import MinHashEncoder
+from skrub import MinHashEncoder, TableVectorizer
 import pandas as pd
 import tiktoken
 from src.models import BertAndTabPFN
@@ -23,24 +23,25 @@ def get_batch_embeddings(texts: str, model="text-embedding-ada-002"):
     res = openai.Embedding.create(input=texts, model=model)["data"]
     return np.array([literal_eval(str(x["embedding"])) for x in res])
 
-def encode(X, encoder_name, dataset_name=None, use_cache=True, override_cache=False):
+def encode(X, col, encoder_name, dataset_name=None, use_cache=True, override_cache=False, fail_if_not_cached=False):
     print("working dir", os.getcwd())
     if use_cache and dataset_name is not None and not override_cache:
         # check if the cache exists
         try:
-            res = np.load(f"cache/{dataset_name}_{encoder_name.replace('/', '_')}.npy")
+            res = np.load(f"cache/{dataset_name}_{col}_{encoder_name.replace('/', '_')}.npy")
             print("Loaded from cache")
             return res
         except FileNotFoundError:
+            if fail_if_not_cached:
+                raise FileNotFoundError(f"Cache not found for {dataset_name}_{col}_{encoder_name.replace('/', '_')}.npy")
             print("Cache not found, computing")
             pass
-    if isinstance(X, pd.DataFrame) or isinstance(X, pd.Series):
-        X = np.array(X)
+    X_col = np.array(X[col])
     encoder_type, encoder_params = encoder_name.split("__", 1)
     if encoder_type == "lm":
         encoder = SentenceTransformer(encoder_params)
-        X = X.reshape(-1)
-        res = encoder.encode(X)
+        X_col = X_col.reshape(-1)
+        res = encoder.encode(X_col)
     elif encoder_type == "skrub":
         if encoder_params.startswith("minhash"):
             n_components = int(encoder_params.split("_")[1])
@@ -54,10 +55,10 @@ def encode(X, encoder_name, dataset_name=None, use_cache=True, override_cache=Fa
                 analyzer = "char"
                 tokenizer = None
             encoder = MinHashEncoder(n_components=n_components, analyzer=analyzer, tokenizer=tokenizer,
-                                     ngram_range=(2, 4) if analyzer == "char" else (1, 3), hashing="fast" if analyzer == "char" else "murmur")
+                                    ngram_range=(2, 4) if analyzer == "char" else (1, 3), hashing="fast" if analyzer == "char" else "murmur")
             # reshape to 2d array
             # if pandas dataframe, convert to numpy array
-            res = X.reshape(-1, 1)
+            res = X_col.reshape(-1, 1)
             res = encoder.fit_transform(res)
         else:
             raise ValueError(f"Unknown skrub encoder {encoder_params}")
@@ -72,16 +73,16 @@ def encode(X, encoder_name, dataset_name=None, use_cache=True, override_cache=Fa
         embedding_encoding = "cl100k_base"  # this the encoding for text-embedding-ada-002
         #max_tokens = 8000
         #encoding = tiktoken.get_encoding(embedding_encoding)
-        #n_tokens = X.combined.apply(lambda x: len(encoding.encode(x)))
+        #n_tokens = X_col.combined.apply(lambda x: len(encoding.encode(x)))
         ## check that the max number of tokens is not exceeded
         #if (n_tokens > max_tokens).any():
         #    raise ValueError("The maximum number of tokens is exceeded")
-        #res = np.array([get_embedding(x, engine=embedding_model) for x in X.tolist()])
-        #df = pd.DataFrame(X, columns=["name"])
+        #res = np.array([get_embedding(x, engine=embedding_model) for x in X_col.tolist()])
+        #df = pd.DataFrame(X_col, columns=["name"])
         #res = df.name.apply(lambda x: get_embedding(x, engine=embedding_model))
         # embed in batch of 100
-        for i in tqdm(range(0, len(X), 500)):
-            batch = X[i:i+500].tolist()
+        for i in tqdm(range(0, len(X_col), 500)):
+            batch = X_col[i:i+500].tolist()
             res_batch = get_batch_embeddings(batch, model=embedding_model)
             if i == 0:
                 res = res_batch
@@ -96,7 +97,7 @@ def encode(X, encoder_name, dataset_name=None, use_cache=True, override_cache=Fa
                                 dim_tabpfn=30, lora=False, disable_dropout=False).to('cuda')
         lm .eval()
         tokenizer = AutoTokenizer.from_pretrained(transformer_name)
-        texts = X.tolist()
+        texts = X_col.tolist()
         all_encoding = tokenizer(texts, padding=True, truncation=True, return_tensors="pt")
         # print the non-padded length median and quantiles
         non_padded_lengths = np.sum(all_encoding["attention_mask"].numpy(), axis=1)
@@ -114,7 +115,7 @@ def encode(X, encoder_name, dataset_name=None, use_cache=True, override_cache=Fa
                                 dim_tabpfn=30, lora=False, disable_dropout=False, embedding_stragegy="mean_pooling").to('cuda')
         lm .eval()
         tokenizer = AutoTokenizer.from_pretrained(transformer_name)
-        texts = X.tolist()
+        texts = X_col.tolist()
         all_encoding = tokenizer(texts, padding=True, truncation=True, return_tensors="pt")
         # # print the non-padded length median and quantiles
         # non_padded_lengths = np.sum(all_encoding["attention_mask"].numpy(), axis=1)
@@ -129,6 +130,37 @@ def encode(X, encoder_name, dataset_name=None, use_cache=True, override_cache=Fa
     if use_cache and dataset_name is not None:
         print("Saving to cache")
         # save the cache
-        np.save(f"cache/{dataset_name}_{encoder_name.replace('/', '_')}.npy", res)
+        np.save(f"cache/{dataset_name}_{col}_{encoder_name.replace('/', '_')}.npy", res)
     
     return res
+
+def encode_high_cardinality_features(X, encoder_name, dataset_name=None, use_cache=True, override_cache=False, cardinality_threshold=30, fail_if_not_cached=False):
+    tb = TableVectorizer(cardinality_threshold=cardinality_threshold,
+                        high_card_cat_transformer = "passthrough",
+                        low_card_cat_transformer = "passthrough",
+                        numerical_transformer = "passthrough",
+                        datetime_transformer = "passthrough",
+    ) #just to get the high cardinality columns
+    tb.fit(X)
+    # get high cardinality columns
+    high_cardinality_columns = []
+    for name, trans, cols in tb.transformers_:
+        print(name, cols)
+        if "high" in name:
+            high_cardinality_columns.extend(cols)
+            break
+    print("High cardinality columns", high_cardinality_columns)
+    # encode the high cardinality columns
+    res = []
+    lengths = []
+    for col in high_cardinality_columns:
+        new_enc = encode(X, col, encoder_name, dataset_name=dataset_name, use_cache=use_cache, override_cache=override_cache, fail_if_not_cached=fail_if_not_cached)
+        res.append(new_enc)
+        lengths.append(new_enc.shape[1])
+    # create a dataframe with name original_col_name__index
+    df = pd.DataFrame(np.concatenate(res, axis=1))
+    for i in range(len(res)):
+        for j in range(lengths[i]):
+            df.rename(columns={i*lengths[i] + j: high_cardinality_columns[i] + "__" + str(j)}, inplace=True)
+    return df, X.drop(high_cardinality_columns, axis=1)
+
