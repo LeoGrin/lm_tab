@@ -17,11 +17,69 @@ from dotenv import load_dotenv
 from tqdm import tqdm
 from ast import literal_eval
 from tenacity import retry, stop_after_attempt, wait_random_exponential
+from torch.utils.data import DataLoader
+from sklearn.feature_extraction.text import HashingVectorizer
+from scipy.sparse import hstack, vstack
 
 @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6))
 def get_batch_embeddings(texts: str, model="text-embedding-ada-002"):
     res = openai.Embedding.create(input=texts, model=model)["data"]
     return np.array([literal_eval(str(x["embedding"])) for x in res])
+
+
+from transformers import AutoTokenizer, AutoModel
+import torch
+
+
+#Mean Pooling - Take attention mask into account for correct averaging
+def mean_pooling(model_output, attention_mask):
+    token_embeddings = model_output[0] #First element of model_output contains all token embeddings
+    input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+    sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
+    sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+    return sum_embeddings / sum_mask
+
+
+
+def encode_hf(sentences, model, batch_size=4):
+    print("Encoding with HF")
+    # Load AutoModel from huggingface model repository
+    tokenizer = AutoTokenizer.from_pretrained(model)
+    model = AutoModel.from_pretrained(model)
+
+    # Set padding token if not set
+    if tokenizer.pad_token is None:
+        print("Setting padding token")
+        tokenizer.pad_token = tokenizer.eos_token
+
+    # Make sure model and tokenizer are on the same device
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model = model.to(device)
+
+    # Create a DataLoader to handle batching of the sentences
+    sentences_loader = DataLoader(sentences, batch_size=batch_size, shuffle=False)
+
+    # List to store all embeddings
+    all_embeddings = []
+
+    for sentence_batch in sentences_loader:
+        # Tokenize sentences
+        encoded_input = tokenizer(sentence_batch, padding=True, truncation=True, max_length=128, return_tensors='pt')
+
+        # Move tensors to the same device as the model
+        encoded_input = encoded_input.to(device)
+
+        # Compute token embeddings
+        with torch.no_grad():
+            model_output = model(**encoded_input)
+
+        # Perform pooling. In this case, mean pooling
+        sentence_embeddings = mean_pooling(model_output, encoded_input['attention_mask'])
+
+        # Move embeddings to CPU, convert to numpy and store
+        all_embeddings.extend(sentence_embeddings.cpu().numpy())
+    return np.array(all_embeddings)
+
 
 def encode(X, col, encoder_name, dataset_name=None, use_cache=True, override_cache=False, fail_if_not_cached=False):
     print("working dir", os.getcwd())
@@ -38,10 +96,14 @@ def encode(X, col, encoder_name, dataset_name=None, use_cache=True, override_cac
             pass
     X_col = np.array(X[col])
     encoder_type, encoder_params = encoder_name.split("__", 1)
+    print("Encoder type", encoder_type)
+    print("Encoder params", encoder_params)
     if encoder_type == "lm":
         encoder = SentenceTransformer(encoder_params)
         X_col = X_col.reshape(-1)
         res = encoder.encode(X_col)
+    elif encoder_type == "hf":
+        res = encode_hf(X_col.tolist(), encoder_params)
     elif encoder_type == "skrub":
         if encoder_params.startswith("minhash"):
             n_components = int(encoder_params.split("_")[1])
@@ -83,6 +145,7 @@ def encode(X, col, encoder_name, dataset_name=None, use_cache=True, override_cac
         # embed in batch of 100
         for i in tqdm(range(0, len(X_col), 500)):
             batch = X_col[i:i+500].tolist()
+            print(batch)
             res_batch = get_batch_embeddings(batch, model=embedding_model)
             if i == 0:
                 res = res_batch
@@ -159,8 +222,15 @@ def encode_high_cardinality_features(X, encoder_name, dataset_name=None, use_cac
         lengths.append(new_enc.shape[1])
     # create a dataframe with name original_col_name__index
     df = pd.DataFrame(np.concatenate(res, axis=1))
+
+    #df = pd.DataFrame(np.concatenate(res, axis=1))
+    # for i in range(len(res)):
+    #     for j in range(lengths[i]):
+    #         df.rename(columns={i*lengths[i] + j: high_cardinality_columns[i] + "__" + str(j)}, inplace=True)
+    new_column_names = []
     for i in range(len(res)):
         for j in range(lengths[i]):
-            df.rename(columns={i*lengths[i] + j: high_cardinality_columns[i] + "__" + str(j)}, inplace=True)
+            new_column_names.append(high_cardinality_columns[i] + "__" + str(j))
+    df.columns = new_column_names
     return df, X.drop(high_cardinality_columns, axis=1)
 

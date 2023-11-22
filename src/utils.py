@@ -8,6 +8,8 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import cross_val_score, cross_validate
 from sklearn.base import clone
+from sklearn.ensemble import VotingClassifier, StackingClassifier
+from sklearn.linear_model import LogisticRegression, LinearRegression
 import torch
 from skrub import TableVectorizer, MinHashEncoder
 
@@ -139,7 +141,7 @@ def preprocess_input(eval_xs, eval_ys, eval_position, device, preprocess_transfo
 
 
 def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, model_name, model, encoding,
-                        cv, regression=False, **kwargs):
+                        cv, regression=False, no_interaction_between_enc_and_rest=False, **kwargs):
     """
     X_enc: np array of shape (n_samples, embedding_dim), the embedded texts
     X_rest: np array of shape (n_samples, n_features), additional tabular data
@@ -151,9 +153,10 @@ def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, mod
     encoding: str, the name of the encoding which was used to create X_enc
     cv: sklearn cross validator, the cross validator to use
     regression: bool, whether to use regression or classification, default False
+    no_interaction_between_enc_and_rest: bool, whether to use the interaction between X_enc and X_rest, default False
     """
     assert model_name in ["TabPFNClassifier", "TabPFNClassifier_basic", "LogisticRegression", "GradientBoostingClassifier", "GradientBoostingRegressor", "LinearRegression"]
-    assert encoding.startswith("lm__") or encoding.startswith("skrub__") or encoding.startswith("bert_custom__") or encoding.startswith("openai__") or encoding.startswith("bert_custom_pooling__")
+    assert encoding.startswith("lm__") or  encoding.startswith("hf__") or encoding.startswith("skrub__") or encoding.startswith("bert_custom__") or encoding.startswith("openai__") or encoding.startswith("bert_custom_pooling__")
     #TODO: make this cleaner
     # we want to eliminate certain combinations
     # passthrough and lm__ means taking the full lm embedding, which is slow if the model is not LogisticRegression
@@ -172,7 +175,7 @@ def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, mod
             low_card_cat_transformer = OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)
         else:
             low_card_cat_transformer = OneHotEncoder(handle_unknown="ignore")
-        if model_name.startswith("LogisticRegression"):
+        if model_name.startswith("LogisticRegression") or model_name.startswith("LinearRegression"):
             numerical_transformer = StandardScaler()
         else:
             numerical_transformer = "passthrough"
@@ -181,7 +184,7 @@ def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, mod
                                     low_card_cat_transformer = low_card_cat_transformer,
                                     numerical_transformer=numerical_transformer,
                                     cardinality_threshold=30)
-    if X_rest is not None and X_enc is not None:
+    if X_enc is not None:
         
         # Assuming X_enc and X_rest are numpy arrays, you can get their shapes
         n_enc_columns = X_enc.shape[1]
@@ -191,43 +194,47 @@ def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, mod
         # get the indices of the columns for each original column
         encoded_columns_indices = []
         for col in original_column_names:
-            indices = [i for i, c in enumerate(X_enc.columns) if c.startswith(col)]
+            indices = [i for i, c in enumerate(X_enc.columns) if c.split("__")[0] == col]
             encoded_columns_indices.append(indices)
         print(encoded_columns_indices)
         print(len(encoded_columns_indices))
-        n_rest_columns = X_rest.shape[1]
-
-        # Create column indices for X_enc and X_rest
-        enc_indices = np.arange(n_enc_columns)
-        rest_indices = np.arange(n_enc_columns, n_enc_columns + n_rest_columns)
-        #check
-        all_indices = np.concatenate(encoded_columns_indices + [rest_indices])
-        # assert no duplicates
-        assert len(all_indices) == len(np.unique(all_indices))
-        # assert we have all indices
-        assert set(all_indices) == set(np.arange(n_enc_columns + n_rest_columns))
 
         # Create the ColumnTransformer
         #TODO: test this
         transformers = []
         for i in range(len(original_column_names)):
             transformers.append((f"dim_reduction_{i}", dim_reduction if isinstance(dim_reduction, str) else clone(dim_reduction), encoded_columns_indices[i]))
-        transformers.append(('rest_trans', rest_trans, rest_indices))
+        if X_rest is not None:
+            n_rest_columns = X_rest.shape[1]
+
+            # Create column indices for X_enc and X_rest
+            enc_indices = np.arange(n_enc_columns)
+            rest_indices = np.arange(n_enc_columns, n_enc_columns + n_rest_columns)
+            #check
+            all_indices = np.concatenate(encoded_columns_indices + [rest_indices])
+            # assert no duplicates
+            assert len(all_indices) == len(np.unique(all_indices)), f"Duplicate indices: {[i for i in all_indices if list(all_indices).count(i) > 1]}"
+            # assert we have all indices
+            assert set(all_indices) == set(np.arange(n_enc_columns + n_rest_columns))
+
+            transformers.append(('rest_trans', rest_trans, rest_indices))
+            full_X = np.concatenate([X_enc, X_rest], axis=1)
+        else:
+            full_X = X_enc
         print(transformers)
         complete_trans = ColumnTransformer(
             transformers=transformers,
         )
         
 
-        full_X = np.concatenate([X_enc, X_rest], axis=1)
-        print(X_enc.shape, X_rest.shape, full_X.shape)
+        
+        #print(X_enc.shape, X_rest.shape, full_X.shape)
         print(complete_trans.fit_transform(full_X).shape)
     elif X_rest is not None:
         complete_trans = rest_trans
         full_X = X_rest
     else:
-        complete_trans = dim_reduction
-        full_X = X_enc
+        raise Exception("X_enc and X_rest cannot both be None")
 
 
     pipeline = Pipeline([("encoding", complete_trans), ("model", model)])
@@ -248,6 +255,150 @@ def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, mod
         'encoding': encoding,
         'dim_reduction': dim_reduction_name,
         'model': model_name,
+        #'accuracies': scores['test_accuracy'],
+        #'roc_auc': scores['test_roc_auc_ovr'],
+        'n_train': n_train,
+        'n_test': n_test,
+        **kwargs
+    }
+    # add the scores
+    if regression:
+        res['neg_mean_squared_error'] = scores['test_neg_mean_squared_error']
+        res['r2'] = scores['test_r2']
+    else:
+        res['accuracies'] = scores['test_accuracy']
+        res['roc_auc'] = scores['test_roc_auc_ovr']
+    
+    return res
+
+def run_on_encoded_data_ensemble(X_enc, X_rest, y, dim_reduction_name, dim_reduction, enc_model_name, enc_model, rest_model_name, rest_model, encoding,
+                        aggregation="voting", meta_clf=None,
+                        cv=5, regression=False, **kwargs):
+    """
+    X_enc: np array of shape (n_samples, embedding_dim), the embedded texts
+    X_rest: np array of shape (n_samples, n_features), additional tabular data
+    y: np array of shape (n_samples,), the classifcation target
+    dim_reduction_name: str, the name of the dim reduction method
+    dim_reduction: sklearn transformer, the dim reduction method
+    model_name: str, the name of the model
+    model: sklearn model, the model
+    encoding: str, the name of the encoding which was used to create X_enc
+    cv: sklearn cross validator, the cross validator to use
+    regression: bool, whether to use regression or classification, default False
+    no_interaction_between_enc_and_rest: bool, whether to use the interaction between X_enc and X_rest, default False
+    """
+    assert enc_model_name in ["TabPFNClassifier", "TabPFNClassifier_basic", "LogisticRegression", "GradientBoostingClassifier", "GradientBoostingRegressor", "LinearRegression"]
+    assert rest_model_name in ["TabPFNClassifier", "TabPFNClassifier_basic", "LogisticRegression", "GradientBoostingClassifier", "GradientBoostingRegressor", "LinearRegression"]
+    assert encoding.startswith("lm__") or encoding.startswith("skrub__") or encoding.startswith("bert_custom__") or encoding.startswith("openai__") or encoding.startswith("bert_custom_pooling__")
+    #TODO: make this cleaner
+    # we want to eliminate certain combinations
+    # passthrough and lm__ means taking the full lm embedding, which is slow if the model is not LogisticRegression
+    # for skrub encodings, we don't want to use passthrough
+    if dim_reduction_name == "passthrough" and not (enc_model_name in ["LogisticRegression", "LinearRegression"]) and not encoding.startswith("skrub"):
+        print("Skipping {} with {} and {}".format(enc_model_name, dim_reduction_name, encoding))
+        return None
+    if dim_reduction_name != "passthrough" and encoding.startswith("skrub"):
+        print("Skipping {} with {} and {}".format(enc_model_name, dim_reduction_name, encoding))
+        return None
+    print("Running {} with {} and {}".format(enc_model_name, dim_reduction_name, encoding))
+    assert (X_enc is not None) and (X_rest is not None)
+    # encode X_rest with the TableVectorizer
+    if rest_model_name.startswith("TabPFNClassifier"):
+        # ordinal encoding for low_cardinality columns
+        low_card_cat_transformer = OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)
+    else:
+        low_card_cat_transformer = OneHotEncoder(handle_unknown="ignore")
+    if rest_model_name.startswith("LogisticRegression") or rest_model_name.startswith("LinearRegression"):
+        numerical_transformer = StandardScaler()
+    else:
+        numerical_transformer = "passthrough"
+    
+    rest_trans = TableVectorizer(high_card_cat_transformer = MinHashEncoder(n_components=10, analyzer='char'),
+                                low_card_cat_transformer = low_card_cat_transformer,
+                                numerical_transformer=numerical_transformer,
+                                cardinality_threshold=30)
+        
+    # Assuming X_enc and X_rest are numpy arrays, you can get their shapes
+    n_enc_columns = X_enc.shape[1]
+    # names of the columns should be of format original_column_name__index
+    assert all(["__" in col for col in X_enc.columns])
+    original_column_names = np.unique([col.split("__")[0] for col in X_enc.columns])
+    # get the indices of the columns for each original column
+    encoded_columns_indices = []
+    for col in original_column_names:
+        indices = [i for i, c in enumerate(X_enc.columns) if c.split("__")[0] == col]
+        encoded_columns_indices.append(indices)
+    print(encoded_columns_indices)
+    print(len(encoded_columns_indices))
+
+    # Create the ColumnTransformer
+    #TODO: test this
+    enc_transformers = []
+    for i in range(len(original_column_names)):
+        enc_transformers.append((f"dim_reduction_{i}", dim_reduction if isinstance(dim_reduction, str) else clone(dim_reduction), encoded_columns_indices[i]))
+    n_rest_columns = X_rest.shape[1]
+
+    # Create column indices for X_enc and X_rest
+    enc_indices = np.arange(n_enc_columns)
+    rest_indices = np.arange(n_enc_columns, n_enc_columns + n_rest_columns)
+    #check
+    all_indices = np.concatenate(encoded_columns_indices + [rest_indices])
+    # assert no duplicates
+    assert len(all_indices) == len(np.unique(all_indices)), f"Duplicate indices: {[i for i in all_indices if list(all_indices).count(i) > 1]}"
+    # assert we have all indices
+    assert set(all_indices) == set(np.arange(n_enc_columns + n_rest_columns))
+    # drop rest indices in the enc_trans
+    enc_transformers.append(("drop_rest_columns", "drop", rest_indices))
+
+
+    enc_trans = ColumnTransformer(
+        transformers=enc_transformers,
+    )
+
+    full_rest_trans = ColumnTransformer(
+        transformers=[("rest_trans", rest_trans, rest_indices),
+                      ("drop_enc_columns", "drop", enc_indices)]
+    )
+    
+    enc_pipeline = Pipeline([
+        ("encoding", enc_trans), 
+        ("model", enc_model)])
+    rest_pipeline = Pipeline([("encoding", full_rest_trans), ("model", rest_model)])
+
+
+    #pipeline = Pipeline([("encoding", complete_trans), ("model", model)])
+    if aggregation == "voting":
+        final_estimator = VotingClassifier(
+            estimators=[("enc", enc_pipeline), ("rest", rest_pipeline)],
+            voting="soft"
+        )
+    elif aggregation == "stacking":
+        if meta_clf is None:
+            meta_clf = LogisticRegression() if not regression else LinearRegression()
+        final_estimator = StackingClassifier(
+            estimators=[("enc", enc_pipeline), ("rest", rest_pipeline)],
+            final_estimator=meta_clf
+        )
+
+    full_X = np.concatenate([X_enc, X_rest], axis=1)
+    #scores = cross_val_score(pipeline, full_X, y, scoring="accuracy", cv=cv)
+    # report both accuracy and roc_auc
+    if regression:
+        scores = cross_validate(final_estimator, full_X, y, scoring=["neg_mean_squared_error", "r2"], cv=cv)
+    else:
+        scores = cross_validate(final_estimator, full_X, y, scoring=["accuracy", "roc_auc_ovr"], cv=cv)
+
+    try:
+        n_train = cv.n_train
+        n_test = cv.n_test
+    except:
+        n_train = np.nan
+        n_test = np.nan
+    res =  {
+        'encoding': encoding,
+        'dim_reduction': dim_reduction_name,
+        'enc_model': enc_model_name,
+        "rest_model": rest_model_name,
         #'accuracies': scores['test_accuracy'],
         #'roc_auc': scores['test_roc_auc_ovr'],
         'n_train': n_train,
@@ -323,3 +474,38 @@ class TabPFNClassifierBis(TabPFNClassifier):
         res = super().predict(X, **kwargs)
         super().remove_models_from_memory()
         return res
+    
+
+def evaluate(pred_joins, gt_joins):
+    """Evaluate the performance of fuzzy joins
+
+    Parameters
+    ----------
+    pred_joins: list
+        A list of tuple pairs (id_l, id_r) that are predicted to be matches
+
+    gt_joins: list
+        The ground truth matches
+
+    Returns
+    -------
+    precision: float
+        Precision score
+
+    recall: float
+        Recall score
+
+    f1: float
+        F1 score
+    """
+    pred = {(le, ri) for le, ri in pred_joins}
+    gt = {(le, ri) for le, ri in gt_joins}
+
+    tp = pred.intersection(gt)
+    precision = len(tp) / len(pred)
+    recall = len(tp) / len(gt)
+    if precision > 0 or recall > 0:
+        f1 = 2 * precision * recall / (precision + recall)
+    else:
+        f1 = 0
+    return precision, recall, f1
