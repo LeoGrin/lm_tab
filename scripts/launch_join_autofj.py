@@ -64,16 +64,20 @@ dataset_list = ['Amphibian',
  'Venue',
  'Wrestler']
 
+#dataset_list = ["HistoricBuilding"]
 
-import submitit
-executor = submitit.AutoExecutor(folder="logs")
-executor.update_parameters(timeout_min=700, slurm_partition='parietal,normal', slurm_array_parallelism=100, cpus_per_task=4,
-                            exclude="margpu009,marg00[1-9],marg0[11-12],marg0[14-15],marg0[16-20],marg0[25-32]")
-# change name of job
-executor.update_parameters(name="join")
+
+# import submitit
+# executor = submitit.AutoExecutor(folder="logs")
+# executor.update_parameters(slurm_partition='parietal,normal', timeout_min=100, mem_gb=64,
+#                             exclude="margpu009,marg00[1-9],marg0[11-12],marg0[14-15],marg0[16-20],marg0[25-32]")
+# # change name of job
+# executor.update_parameters(name="join")
 
 import pandas as pd
 def compute_join(dataset, target):
+    print("dataset", dataset)
+    print("target", target)
     left_table, right_table, gt = load_data(dataset)
     # encode both tables with fasttext (column title)
 
@@ -100,13 +104,12 @@ def compute_join(dataset, target):
         "f1": f1
     }
 
-jobs = []
-with executor.batch():
-    for dataset in dataset_list:
-            for match_score in [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2]:
-                jobs.append(executor.submit(compute_join, dataset, match_score))
+results = []
+#with executor.batch():
+for dataset in dataset_list:
+        for match_score in [0.9, 0.8, 0.7, 0.6, 0.5]:
+            results.append(compute_join(dataset, match_score))
 
-results = [job.result() for job in jobs]
 df = pd.DataFrame(results)
 
 df.to_csv("results_join_autofj.csv", index=False)
