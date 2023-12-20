@@ -20,6 +20,59 @@ from tenacity import retry, stop_after_attempt, wait_random_exponential
 from torch.utils.data import DataLoader
 from sklearn.feature_extraction.text import HashingVectorizer
 from scipy.sparse import hstack, vstack
+from fasttext import load_model
+import fasttext.util
+from sklearn.base import BaseEstimator, TransformerMixin
+
+
+
+#taken from https://github.com/pcerda/string_categorical_encoders/blob/master/column_encoder.py
+class PretrainedFastText(BaseEstimator, TransformerMixin):
+    """
+    Category embedding using a fastText pretrained model.
+    """
+
+    def __init__(self, n_components, language='english'):
+        self.n_components = n_components
+        self.language = language
+
+    def fit(self, X, y=None):
+
+        path_dict = dict(
+            #english='crawl-300d-2M-subword.bin',
+            english="cc.en.300.bin",
+            french='cc.fr.300.bin',
+            hungarian='cc.hu.300.bin')
+        
+
+
+        if self.language not in path_dict.keys():
+            raise AttributeError(
+                'language %s has not been downloaded yet' % self.language)
+
+
+        self.ft_model = load_model(path_dict[self.language])
+        # reduce dimension if necessary
+        if self.n_components < 300:
+            fasttext.util.reduce_model(self.ft_model, self.n_components)
+
+        return self
+
+    def transform(self, X):
+        X = X.ravel()
+        unq_X, lookup = np.unique(X, return_inverse=True)
+        X_dict = dict()
+        for i, x in enumerate(unq_X):
+            if x.find('\n') != -1:
+                unq_X[i] = ' '.join(x.split('\n'))
+
+        for x in unq_X:
+            X_dict[x] = self.ft_model.get_sentence_vector(x)
+
+        X_out = np.empty((len(lookup), self.n_components))
+        for x, x_out in zip(unq_X[lookup], X_out):
+            x_out[:] = X_dict[x]
+        return X_out
 
 @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6))
 def get_batch_embeddings(texts: str, model="text-embedding-ada-002"):
@@ -41,7 +94,7 @@ def mean_pooling(model_output, attention_mask):
 
 
 
-def encode_hf(sentences, model, batch_size=4):
+def encode_hf(sentences, model, batch_size=1):
     print("Encoding with HF")
     # Load AutoModel from huggingface model repository
     tokenizer = AutoTokenizer.from_pretrained(model)
@@ -101,12 +154,21 @@ def encode(X, col, encoder_name, dataset_name=None, use_cache=True, override_cac
     if encoder_type == "lm":
         encoder = SentenceTransformer(encoder_params)
         X_col = X_col.reshape(-1)
+        if "e5" in encoder_params:
+            print("Seems like a e5 model, adding 'query: '")
+            print(encoder_params)
+            X_col = np.array(["query: " + elem for elem in X_col])
+            print("Samples:")
+            print(X_col[:10])
         res = encoder.encode(X_col)
     elif encoder_type == "hf":
         res = encode_hf(X_col.tolist(), encoder_params)
+    elif encoder_type == "fasttext":
+        res = PretrainedFastText(n_components=int(encoder_params)).fit_transform(X_col)
     elif encoder_type == "skrub":
         if encoder_params.startswith("minhash"):
             n_components = int(encoder_params.split("_")[1])
+            print("n components", n_components)
             if len(encoder_params.split("_")) > 2:
                 analyzer = encoder_params.split("_")[2]
                 tokenizer = encoder_params.split("_")[3]

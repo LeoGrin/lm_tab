@@ -156,12 +156,12 @@ def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, mod
     no_interaction_between_enc_and_rest: bool, whether to use the interaction between X_enc and X_rest, default False
     """
     assert model_name in ["TabPFNClassifier", "TabPFNClassifier_basic", "LogisticRegression", "GradientBoostingClassifier", "GradientBoostingRegressor", "LinearRegression"]
-    assert encoding.startswith("lm__") or  encoding.startswith("hf__") or encoding.startswith("skrub__") or encoding.startswith("bert_custom__") or encoding.startswith("openai__") or encoding.startswith("bert_custom_pooling__")
+    assert encoding.startswith("lm__") or  encoding.startswith("hf__") or encoding.startswith("skrub__") or encoding.startswith("bert_custom__") or encoding.startswith("openai__") or encoding.startswith("bert_custom_pooling__") or encoding.startswith("fasttext__")
     #TODO: make this cleaner
     # we want to eliminate certain combinations
     # passthrough and lm__ means taking the full lm embedding, which is slow if the model is not LogisticRegression
     # for skrub encodings, we don't want to use passthrough
-    if dim_reduction_name == "passthrough" and not (model_name in ["LogisticRegression", "LinearRegression"]) and not encoding.startswith("skrub"):
+    if dim_reduction_name == "passthrough" and not (model_name in ["LogisticRegression", "LinearRegression"]) and not encoding.startswith("skrub") and not encoding.startswith("fasttext__"):
         print("Skipping {} with {} and {}".format(model_name, dim_reduction_name, encoding))
         return None
     if dim_reduction_name != "passthrough" and encoding.startswith("skrub"):
@@ -289,7 +289,8 @@ def run_on_encoded_data_ensemble(X_enc, X_rest, y, dim_reduction_name, dim_reduc
     """
     assert enc_model_name in ["TabPFNClassifier", "TabPFNClassifier_basic", "LogisticRegression", "GradientBoostingClassifier", "GradientBoostingRegressor", "LinearRegression"]
     assert rest_model_name in ["TabPFNClassifier", "TabPFNClassifier_basic", "LogisticRegression", "GradientBoostingClassifier", "GradientBoostingRegressor", "LinearRegression"]
-    assert encoding.startswith("lm__") or encoding.startswith("skrub__") or encoding.startswith("bert_custom__") or encoding.startswith("openai__") or encoding.startswith("bert_custom_pooling__")
+    assert encoding.startswith("lm__") or encoding.startswith("skrub__") or encoding.startswith("bert_custom__") \
+    or encoding.startswith("openai__") or encoding.startswith("bert_custom_pooling__") or encoding.startswith("fasttext__") or encoding.startswith("hf__")
     #TODO: make this cleaner
     # we want to eliminate certain combinations
     # passthrough and lm__ means taking the full lm embedding, which is slow if the model is not LogisticRegression
@@ -401,6 +402,7 @@ def run_on_encoded_data_ensemble(X_enc, X_rest, y, dim_reduction_name, dim_reduc
         "rest_model": rest_model_name,
         #'accuracies': scores['test_accuracy'],
         #'roc_auc': scores['test_roc_auc_ovr'],
+        "aggregation": aggregation,
         'n_train': n_train,
         'n_test': n_test,
         **kwargs
