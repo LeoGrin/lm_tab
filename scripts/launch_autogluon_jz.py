@@ -42,7 +42,7 @@ datasets = ['bikewale', 'clear_corpus', 'company_employees',
 #  'book',
 #  'salary',
 #  'house'
-]
+#]
 #datasets = new_datasets + datasets
 # datasets = ['wine_review',
 #  'prod',
