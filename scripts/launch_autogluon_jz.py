@@ -86,7 +86,7 @@ print(len(datasets))
 #datasets = ["agora"]
 
 def run_autogluon(X, y, cv, time_limit=180, presets="medium_quality", 
-                  hf_model="default"):
+                  hf_model="default", model_path="/tmp/autogluon"):
     # Prepare the data for AutoGluon
     data = pd.DataFrame(X)
     data['target'] = y
@@ -122,7 +122,7 @@ def run_autogluon(X, y, cv, time_limit=180, presets="medium_quality",
     return res
 
 def run_autogluon_multimodal(X, y, cv, time_limit=180, presets="medium_quality",
-                            hf_model="default"):
+                            hf_model="default", model_path="/tmp/autogluon_multimodal"):
     # Prepare the data for AutoGluon
     data = pd.DataFrame(X)
     data['target'] = y
@@ -201,7 +201,7 @@ def pipeline(config):#dataset, encoding, n_test, dim_reduction_name, model_name,
         res_scores["hf_model"] = hf_model
         encoding = "autogluon_multimodal" if only_multimodal else "autogluon"
         res_scores["encoding"] = encoding
-        return (n_train, features, res_scores)
+        #return (n_train, features, res_scores)
     elif features == "text_only":
         raise Exception("Not implemented")
         #return (n_train, features, time_limit, preset, run_on_encoded_data(X_enc, None, y, dim_reduction_name, dim_reduction, model_name, model, encoding, cv, dataset=dataset, features=features))
@@ -210,7 +210,7 @@ def pipeline(config):#dataset, encoding, n_test, dim_reduction_name, model_name,
         #return (n_train, features, run_on_encoded_data(None, X_rest, y, dim_reduction_name, dim_reduction, model_name, model, encoding, cv, dataset=dataset, features=features))
 
     # Save the result to a CSV file
-    df = pd.DataFrame([res])
+    df = pd.DataFrame([res_scores])
     # Add the hash to the dataframe
     df['config_hash'] = config_hash
     base_path = f"/lustre/fswork/projects/rech/ptq/ueg53am/lm_tab/results_raw"
@@ -219,74 +219,75 @@ def pipeline(config):#dataset, encoding, n_test, dim_reduction_name, model_name,
     else:
         df.to_csv(f"{base_path}/{encoding}_{config_hash}.csv", mode='a', header=False, index=False)
 
-n_trains = [1000]
-#n_trains = [3000, 4000, 5000]
-time_limit = [3 * 60]
-presets = ["medium_quality"]
-features_list = ["all"]#, "rest_only"]
-hf_models = ["default"]
-n_test = 500
+if __name__ == "__main__":
+    n_trains = [1000]
+    #n_trains = [3000, 4000, 5000]
+    time_limit = [3 * 60]
+    presets = ["medium_quality"]
+    features_list = ["all"]#, "rest_only"]
+    hf_models = ["default"]
+    n_test = 500
 
-# Generate all combinations of parameters
-param_combinations = list(product(datasets, [n_test], n_trains, features_list, time_limit, presets, hf_models))
+    # Generate all combinations of parameters
+    param_combinations = list(product(datasets, [n_test], n_trains, features_list, time_limit, presets, hf_models))
 
-# Chunk your jobs
-CHUNK_SIZE = 500  # Choose a suitable chunk size
-chunks = [param_combinations[i:i + CHUNK_SIZE] for i in range(0, len(param_combinations), CHUNK_SIZE)]
+    # Chunk your jobs
+    CHUNK_SIZE = 500  # Choose a suitable chunk size
+    chunks = [param_combinations[i:i + CHUNK_SIZE] for i in range(0, len(param_combinations), CHUNK_SIZE)]
 
-array_parallelism_total = 4
-array_parallelism = array_parallelism_total // len(chunks)
-print(f"Using {array_parallelism} array parallelism")
+    array_parallelism_total = 4
+    array_parallelism = array_parallelism_total // len(chunks)
+    print(f"Using {array_parallelism} array parallelism")
 
-jobs = []
+    jobs = []
 
-executor = setup_submitit_executor_a100("pipeline", gpus_per_node=1, cpus_per_task=8, time=10)
-# Submit jobs chunk by chunk
+    executor = setup_submitit_executor_a100("pipeline", gpus_per_node=1, cpus_per_task=8, time=10)
+    # Submit jobs chunk by chunk
 
-for i, chunk in enumerate(chunks):
-    while True:
-        try:
-            jobs.extend(executor.map_array(pipeline, chunk))
-            break
-        except Exception as e:
-            print(e)
-            print("Sleeping 200 seconds")
-            time.sleep(200)
-    print(f"Submitted chunk {i+1} of {len(chunks)}, {len(jobs)} jobs to the cluster.")
+    for i, chunk in enumerate(chunks):
+        while True:
+            try:
+                jobs.extend(executor.map_array(pipeline, chunk))
+                break
+            except Exception as e:
+                print(e)
+                print("Sleeping 200 seconds")
+                time.sleep(200)
+        print(f"Submitted chunk {i+1} of {len(chunks)}, {len(jobs)} jobs to the cluster.")
 
 
-# # Define the columns of your dataframe
-# # Open a file to write the results
-# name = "test_longer_autogluon_02_09"
-# for job in jobs:
-#     try:
-#         result = job.result()
-#         if result is not None:
-#             if result[2] is None:
-#                 continue
-#             res = result[2]
-#             # Flatten
-#             #print(result)
-#             #result = [item for sublist in result for item in sublist if item is not None]
-#             # Remove element if it is (_, _, None)
-#             #print(result)
-#             # Merge with n_train, features
-#             #result = [{"n_train": n_train, "features": features, **r} for n_train, features, r in result]
-#             print(res)
-#             df = pd.DataFrame(res)
-#             if len(df):
-#                 # Explode 'accuracies' and 'roc_auc'
-#                 #df = df.explode(['accuracies', "roc_auc"])
-#                 # explode columns with scores
-#                 columns = list(df.columns)
-#                 columns_scores = [col for col in columns if col not in ["n_train", "n_test" "features", 
-#                 "dataset", "time_limit", "preset", "hf_model", "encoding"]]
-#                 # check if the file exists
-#                 if not os.path.isfile(f"../results/{name}.csv"):
-#                     # Create a new file
-#                     df.to_csv(f"../results/{name}.csv", index=False)
-#                 else:
-#                     # Append to the file
-#                     df.to_csv(f"../results/{name}.csv", mode='a', header=False, index=False)
-#     except Exception as e:
-#         print(f"Job {job.job_id} failed with exception: {e}")
+    # # Define the columns of your dataframe
+    # # Open a file to write the results
+    # name = "test_longer_autogluon_02_09"
+    # for job in jobs:
+    #     try:
+    #         result = job.result()
+    #         if result is not None:
+    #             if result[2] is None:
+    #                 continue
+    #             res = result[2]
+    #             # Flatten
+    #             #print(result)
+    #             #result = [item for sublist in result for item in sublist if item is not None]
+    #             # Remove element if it is (_, _, None)
+    #             #print(result)
+    #             # Merge with n_train, features
+    #             #result = [{"n_train": n_train, "features": features, **r} for n_train, features, r in result]
+    #             print(res)
+    #             df = pd.DataFrame(res)
+    #             if len(df):
+    #                 # Explode 'accuracies' and 'roc_auc'
+    #                 #df = df.explode(['accuracies', "roc_auc"])
+    #                 # explode columns with scores
+    #                 columns = list(df.columns)
+    #                 columns_scores = [col for col in columns if col not in ["n_train", "n_test" "features", 
+    #                 "dataset", "time_limit", "preset", "hf_model", "encoding"]]
+    #                 # check if the file exists
+    #                 if not os.path.isfile(f"../results/{name}.csv"):
+    #                     # Create a new file
+    #                     df.to_csv(f"../results/{name}.csv", index=False)
+    #                 else:
+    #                     # Append to the file
+    #                     df.to_csv(f"../results/{name}.csv", mode='a', header=False, index=False)
+    #     except Exception as e:
+    #         print(f"Job {job.job_id} failed with exception: {e}")
