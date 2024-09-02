@@ -94,9 +94,9 @@ def run_autogluon(X, y, cv, time_limit=180, presets="medium_quality",
     all_scores = []
 
     # Use cv to split the data and fit the model
-    for train_idx, test_idx in cv.split(data):
+    for i, (train_idx, test_idx) in enumerate(cv.split(data)):
         predictor = TabularPredictor(label='target',
-                                     path=model_path)
+                                     path=model_path + f"_{i}")
         train_data = data.iloc[train_idx]
         test_data = data.iloc[test_idx]
         hyperparameters = get_hyperparameter_config('multimodal')
@@ -130,9 +130,9 @@ def run_autogluon_multimodal(X, y, cv, time_limit=180, presets="medium_quality",
     all_scores = []
 
     # Use cv to split the data and fit the model
-    for train_idx, test_idx in cv.split(data):
+    for i, (train_idx, test_idx) in enumerate(cv.split(data)):
         predictor = MultiModalPredictor(label='target',
-                                        path=model_path)
+                                        path=model_path + f"_{i}")
         train_data = data.iloc[train_idx]
         test_data = data.iloc[test_idx]
         
