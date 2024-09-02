@@ -30,9 +30,10 @@ import time
 
 #encodings = ["skrub__minhash_10", "skrub__minhash_20", "skrub__minhash_30", "skrub__minhash_60", "skrub__minhash_100", "skrub__minhash_200", "skrub__minhash_300", "skrub__minhash_400", "skrub__minhash_500"]# "skrub__minhash_600"]
 
-encodings = ["openai__"]
+#encodings = ["skrub__minhash_30", "openai__"]
+encodings = ["fasttext__30"]
 model_names = [
-    "BAAI/bge-large-en-v1.5",
+    #"BAAI/bge-large-en-v1.5",
     # "BAAI/bge-base-en-v1.5",
     #"llmrails/ember-v1",
     # "thenlper/gte-large",
@@ -103,6 +104,7 @@ for model_name in model_names:
 # for model_name in model_names:
 #     encodings.append(f"hf__{model_name}")
 #encodings = ["fasttext__30"]
+#encodings.append("fasttext__30")
 
 #encodings.append("openai__")
 # model_names = [
@@ -139,6 +141,25 @@ datasets = ['bikewale', 'clear_corpus', 'company_employees',
        'employee_salary', 'goodreads', 'journal_jcr_cls', 'ramen_ratings',
        'spotify', 'us_accidents_counts', 'us_accidents_severity',
        'us_presidential', 'wine_review', 'zomato']
+datasets.extend(['prod',
+ 'airbnb',
+ 'channel',
+ 'wine',
+ 'imdb',
+ 'jigsaw',
+ 'fake',
+ 'kick',
+ 'ae',
+ 'qaa',
+ 'qaq',
+ 'cloth',
+ 'mercari',
+ 'jc',
+ 'pop',
+ 'book',
+ 'salary',
+ 'house'
+ ])
 #datasets = [f"companies_{year}" for year in range(2012, 2024)]
 
 #datasets = ["drug_directory", "met_objects"] #TODO
@@ -160,7 +181,7 @@ print("encodings", encodings)
 
 def pipeline(config):#dataset, encoding, n_test, dim_reduction_name, model_name, n_train, features):
     print(config)
-    dataset, encoding, n_test, dim_reduction_name, model_name, n_train, features = config
+    dataset, encoding, n_test, dim_reduction_name, model_name, n_train, features, no_interaction_between_enc_and_rest = config
     models = {"LogisticRegression": LogisticRegression(), "GradientBoostingClassifier": GradientBoostingClassifier()}
     dim_reductions = {"PCA_10": PCA(n_components=10),
                     "PCA_20": PCA(n_components=20),
@@ -182,20 +203,22 @@ def pipeline(config):#dataset, encoding, n_test, dim_reduction_name, model_name,
         return (n_train, features, None)
     cv = FixedSizeSplit(n_splits=7, n_train=n_train, n_test=n_test, random_state=42)
     if features == "all":
-        return (n_train, features, run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, model_name, model, encoding, cv, dataset=dataset, features=features))
+        return (n_train, features, run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, 
+        model_name, model, encoding, cv, dataset=dataset, features=features, no_interaction_between_enc_and_rest=no_interaction_between_enc_and_rest))
     elif features == "text_only":
         return (n_train, features, run_on_encoded_data(X_enc, None, y, dim_reduction_name, dim_reduction, model_name, model, encoding, cv, dataset=dataset, features=features))
     elif features == "rest_only":
         return (n_train, features, run_on_encoded_data(None, X_rest, y, dim_reduction_name, dim_reduction, model_name, model, encoding, cv, dataset=dataset, features=features))
 
-n_trains = [500, 1000, 2000, 3000, 4000, 5000]
-features_list = ["all"]#, "rest_only"]
+n_trains = [1000, 3000, 5000]
+features_list = ["all"]
 model_names = ["GradientBoostingClassifier"]
-dim_reduction_names = ["PCA_10", "PCA_20", "PCA_30", "PCA_60", "PCA_100", "PCA_200", "PCA_300", "PCA_400", "PCA_500"]
+dim_reduction_names = ["passthrough", "PCA_30"]#["PCA_10", "PCA_20", "PCA_30", "PCA_60", "PCA_100", "PCA_200", "PCA_300", "PCA_400", "PCA_500"]
+no_interaction_between_enc_and_rest_list = [False]
 n_test = 500
 
 # Generate all combinations of parameters
-param_combinations = list(product(datasets, encodings, [n_test], dim_reduction_names, model_names, n_trains, features_list))
+param_combinations = list(product(datasets, encodings, [n_test], dim_reduction_names, model_names, n_trains, features_list, no_interaction_between_enc_and_rest_list))
 
 # Chunk your jobs
 CHUNK_SIZE = 500  # Choose a suitable chunk size
@@ -229,12 +252,13 @@ import pandas as pd
 
 # Define the columns of your dataframe
 # Open a file to write the results
-name = "results_varying_dims_14_12"
+name = "complete_benchmark_results_02_09"
 for job in jobs:
     try:
         result = job.result()
         if result is not None:
             if result[2] is None:
+                print("Job failed", result)
                 continue
             res = result[2]
             # Flatten
@@ -256,5 +280,7 @@ for job in jobs:
                 else:
                     # Append to the file
                     df.to_csv(f"../results/{name}.csv", mode='a', header=False, index=False)
+        else:
+            print("No results to save", result)
     except Exception as e:
         print(f"Job {job.job_id} failed with exception: {e}")

@@ -178,7 +178,7 @@ def encode(X, col, encoder_name, dataset_name=None, use_cache=True, override_cac
             else:
                 analyzer = "char"
                 tokenizer = None
-            encoder = MinHashEncoder(n_components=n_components, analyzer=analyzer, tokenizer=tokenizer,
+            encoder = MinHashEncoder(n_components=n_components, #analyzer=analyzer, tokenizer=tokenizer,
                                     ngram_range=(2, 4) if analyzer == "char" else (1, 3), hashing="fast" if analyzer == "char" else "murmur")
             # reshape to 2d array
             # if pandas dataframe, convert to numpy array
@@ -261,8 +261,8 @@ def encode(X, col, encoder_name, dataset_name=None, use_cache=True, override_cac
 
 def encode_high_cardinality_features(X, encoder_name, dataset_name=None, use_cache=True, override_cache=False, cardinality_threshold=30, fail_if_not_cached=False):
     tb = TableVectorizer(cardinality_threshold=cardinality_threshold,
-                        high_card_cat_transformer = "passthrough",
-                        low_card_cat_transformer = "passthrough",
+                        high_cardinality_transformer = "passthrough",
+                        low_cardinality_transformer = "passthrough",
                         numerical_transformer = "passthrough",
                         datetime_transformer = "passthrough",
     ) #just to get the high cardinality columns
@@ -295,4 +295,3 @@ def encode_high_cardinality_features(X, encoder_name, dataset_name=None, use_cac
             new_column_names.append(high_cardinality_columns[i] + "__" + str(j))
     df.columns = new_column_names
     return df, X.drop(high_cardinality_columns, axis=1)
-

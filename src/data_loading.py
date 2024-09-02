@@ -187,7 +187,7 @@ def load_data(data_name, max_rows=None, remove_missing=True, regression=False):
         print("New shape: {}".format(X.shape))
 
     # infer task
-    task = "classification" if len(np.unique(y)) <= 20 else "regression"
+    task = "classification" if len(np.unique(y)) <= 30 else "regression" #TODO: changed this, make sure that it doesn't change for old datasets
     print(f"Original task: {task} for {data_name}")
     if task == "regression":
         if not regression:
@@ -208,7 +208,7 @@ def load_data(data_name, max_rows=None, remove_missing=True, regression=False):
         
 
 
-    assert (len(np.unique(y)) < min(20, len(y))) or regression, "probably a problem with y"
+    assert (len(np.unique(y)) <= min(30, len(y))) or regression, "probably a problem with y" #TODO: changed this, make sure that it doesn't change for old datasets
     if not regression:
         print("Classes", np.unique(y, return_counts=True))
     

@@ -178,3 +178,9 @@ results
 figures
 
 trash
+
+AutogluonModels/
+scripts/logs/
+scripts/cache/
+scripts/checkpoints/
+cc.en.300.bin*

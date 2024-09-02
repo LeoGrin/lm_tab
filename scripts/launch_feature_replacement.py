@@ -33,16 +33,16 @@ def run_on_encoded_data_multiple_dim_rec(X_enc, X_rest, y, original_column_names
         # encode X_rest with the TableVectorizer
         if model_name.startswith("TabPFNClassifier"):
             # ordinal encoding for low_cardinality columns
-            low_card_cat_transformer = OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)
+            low_cardinality_transformer = OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)
         else:
-            low_card_cat_transformer = OneHotEncoder(handle_unknown="ignore")
+            low_cardinality_transformer = OneHotEncoder(handle_unknown="ignore")
         if model_name.startswith("LogisticRegression"):
             numerical_transformer = StandardScaler()
         else:
             numerical_transformer = "passthrough"
         
-        rest_trans = TableVectorizer(high_card_cat_transformer = MinHashEncoder(n_components=10, analyzer='char'),
-                                    low_card_cat_transformer = low_card_cat_transformer,
+        rest_trans = TableVectorizer(high_cardinality_transformer = MinHashEncoder(n_components=10, analyzer='char'),
+                                    low_cardinality_transformer = low_cardinality_transformer,
                                     numerical_transformer=numerical_transformer,
                                     cardinality_threshold=30)
     if X_enc is not None:
@@ -153,8 +153,8 @@ def switch_encoding(base_encoder_name="skrub__minhash_30", new_encoder_name="ope
     X, y = load_data(dataset_name, max_rows=10_000)
     print(X)
     tb = TableVectorizer(cardinality_threshold=cardinality_threshold,
-                        high_card_cat_transformer = "passthrough",
-                        low_card_cat_transformer = "passthrough",
+                        high_cardinality_transformer = "passthrough",
+                        low_cardinality_transformer = "passthrough",
                         numerical_transformer = "passthrough",
                         datetime_transformer = "passthrough",
     ) #just to get the high cardinality columns

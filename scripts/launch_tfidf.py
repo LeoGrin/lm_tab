@@ -17,8 +17,8 @@ import pandas as pd
 def run_with_hv(dataset, analyzer, ngram_range, dim_reduction_name, dim_reduction, cv, model_name, model, features, cardinality_threshold=30, tf_idf=False, **kwargs):
     X, y = load_data(dataset, max_rows=10000)
     tb = TableVectorizer(cardinality_threshold=cardinality_threshold,
-                        high_card_cat_transformer = "passthrough",
-                        low_card_cat_transformer = "passthrough",
+                        high_cardinality_transformer = "passthrough",
+                        low_cardinality_transformer = "passthrough",
                         numerical_transformer = "passthrough",
                         datetime_transformer = "passthrough",
     ) #just to get the high cardinality columns
@@ -41,7 +41,7 @@ def run_with_hv(dataset, analyzer, ngram_range, dim_reduction_name, dim_reductio
 
     X_rest = X.drop(high_cardinality_columns, axis=1)
 
-    rest_trans = TableVectorizer(high_card_cat_transformer = MinHashEncoder(n_components=10, analyzer='char'),
+    rest_trans = TableVectorizer(high_cardinality_transformer = MinHashEncoder(n_components=10, analyzer='char'),
                             cardinality_threshold=30)
     # cv by hand
     # split X

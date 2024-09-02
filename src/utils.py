@@ -50,11 +50,13 @@ from sklearn.utils.validation import _num_samples
 import numpy as np
 
 class FixedSizeSplit(BaseCrossValidator):
-    def __init__(self, n_train: int, n_test: int = None, n_splits: int = 5, random_state: int = None) -> None:
+    def __init__(self, n_train: int, n_test: int = None, n_splits: int = 5, random_state: int = None,
+                 keep_pandas=False) -> None:
         self.n_train = n_train
         self.n_test = n_test
         self.n_splits = n_splits
         self.random_state = random_state
+        self.keep_pandas = keep_pandas
 
     def get_n_splits(self, X=None, y=None, groups=None) -> int:
         return self.n_splits
@@ -172,16 +174,16 @@ def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, mod
         # encode X_rest with the TableVectorizer
         if model_name.startswith("TabPFNClassifier"):
             # ordinal encoding for low_cardinality columns
-            low_card_cat_transformer = OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)
+            low_cardinality_transformer = OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)
         else:
-            low_card_cat_transformer = OneHotEncoder(handle_unknown="ignore")
+            low_cardinality_transformer = OneHotEncoder(handle_unknown="ignore")
         if model_name.startswith("LogisticRegression") or model_name.startswith("LinearRegression"):
             numerical_transformer = StandardScaler()
         else:
             numerical_transformer = "passthrough"
         
-        rest_trans = TableVectorizer(high_card_cat_transformer = MinHashEncoder(n_components=10, analyzer='char'),
-                                    low_card_cat_transformer = low_card_cat_transformer,
+        rest_trans = TableVectorizer(high_cardinality_transformer = MinHashEncoder(n_components=10),# analyzer='char'),
+                                    low_cardinality_transformer = low_cardinality_transformer,
                                     numerical_transformer=numerical_transformer,
                                     cardinality_threshold=30)
     if X_enc is not None:
@@ -259,6 +261,7 @@ def run_on_encoded_data(X_enc, X_rest, y, dim_reduction_name, dim_reduction, mod
         #'roc_auc': scores['test_roc_auc_ovr'],
         'n_train': n_train,
         'n_test': n_test,
+        "no_interaction_between_enc_and_rest": no_interaction_between_enc_and_rest,
         **kwargs
     }
     # add the scores
@@ -306,16 +309,16 @@ def run_on_encoded_data_ensemble(X_enc, X_rest, y, dim_reduction_name, dim_reduc
     # encode X_rest with the TableVectorizer
     if rest_model_name.startswith("TabPFNClassifier"):
         # ordinal encoding for low_cardinality columns
-        low_card_cat_transformer = OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)
+        low_cardinality_transformer = OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)
     else:
-        low_card_cat_transformer = OneHotEncoder(handle_unknown="ignore")
+        low_cardinality_transformer = OneHotEncoder(handle_unknown="ignore")
     if rest_model_name.startswith("LogisticRegression") or rest_model_name.startswith("LinearRegression"):
         numerical_transformer = StandardScaler()
     else:
         numerical_transformer = "passthrough"
     
-    rest_trans = TableVectorizer(high_card_cat_transformer = MinHashEncoder(n_components=10, analyzer='char'),
-                                low_card_cat_transformer = low_card_cat_transformer,
+    rest_trans = TableVectorizer(high_cardinality_transformer = MinHashEncoder(n_components=10, analyzer='char'),
+                                low_cardinality_transformer = low_cardinality_transformer,
                                 numerical_transformer=numerical_transformer,
                                 cardinality_threshold=30)
         
@@ -432,17 +435,17 @@ def run_catboost(X_text, X_rest, y,
     """
 
     if X_rest is not None:
-        rest_trans = TableVectorizer(high_card_cat_transformer = MinHashEncoder(n_components=10, analyzer="char"),
-                                    low_card_cat_transformer = OneHotEncoder(handle_unknown="ignore"),
+        rest_trans = TableVectorizer(high_cardinality_transformer = MinHashEncoder(n_components=10, analyzer="char"),
+                                    low_cardinality_transformer = OneHotEncoder(handle_unknown="ignore"),
                                     numerical_transformer=StandardScaler(),
                                     cardinality_threshold=10)
         rest_trans.fit(X_rest)
         # find the categorical features
         cat_cols = []
         for trans, name, cols in rest_trans.transformers:
-            if name == "low_card_cat_transformer":
+            if name == "low_cardinality_transformer":
                 cat_cols.extend(cols)
-            if name == "high_card_cat_transformer":
+            if name == "high_cardinality_transformer":
                 cat_cols.extend(cols)
         print("cat_cols", cat_cols)
 
@@ -511,3 +514,23 @@ def evaluate(pred_joins, gt_joins):
     else:
         f1 = 0
     return precision, recall, f1
+
+#TODO: merge with encode
+def extract_high_cardinality_features(X, dataset_name=None, use_cache=True, override_cache=False, cardinality_threshold=30, fail_if_not_cached=False):
+    tb = TableVectorizer(cardinality_threshold=cardinality_threshold,
+                        high_cardinality_transformer = "passthrough",
+                        low_cardinality_transformer = "passthrough",
+                        numerical_transformer = "passthrough",
+                        datetime_transformer = "passthrough",
+    ) #just to get the high cardinality columns
+    tb.fit(X)
+    # get high cardinality columns
+    high_cardinality_columns = []
+    for name, trans, cols in tb.transformers_:
+        print(name, cols)
+        if "high" in name:
+            high_cardinality_columns.extend(cols)
+            break
+    print("High cardinality columns", high_cardinality_columns)
+
+    return X[high_cardinality_columns], X.drop(high_cardinality_columns, axis=1)

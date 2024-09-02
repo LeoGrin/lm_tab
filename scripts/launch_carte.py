@@ -6,9 +6,12 @@ from sklearn.pipeline import Pipeline
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import accuracy_score
+from sklearn.ensemble import GradientBoostingClassifier
+from tabpfn import TabPFNClassifier
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+from joblib import Parallel, delayed
 import time
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -16,40 +19,45 @@ import submitit
 from functools import partial
 from itertools import product
 import time
-from autogluon.tabular import TabularDataset, TabularPredictor
-from autogluon.multimodal import MultiModalPredictor
-from autogluon.tabular.configs.hyperparameter_configs import get_hyperparameter_config
+# Add the path to the other project
+#import sys
+#sys.path.append('/scratch/lgrinszt/carte')
+#from src_carte.carte_table_to_graph import Table2GraphTransformer
+#from src_carte.carte_estimator import CARTERegressor, CARTEClassifier
+#from configs.directory import config_directory
+
+from sklearn.metrics import roc_auc_score, accuracy_score, balanced_accuracy_score
 
 
 
 # datasets = ["journal_jcr_cls", "movies", "michelin", "spotify", "employee_salary", "museums", "fifa_footballplayers_22", "jp_anime", "clear_corpus", "company_employees", "us_presidential", "us_accidents_severity", "us_accidents_counts", "wine_review"]
 # datasets.extend(["building_permits", "public", "kickstarter", "colleges", "medical_charge", "traffic_violations"]) #  "agora"
 # datasets.extend(["bikewale", "goodreads", "zomato", "coffee_fix", "nfl_contract", "employee-remuneration-and-expenses-earning-over-75000", "coffee_analysis", "ramen_ratings", "beer_profile_and_ratings", "adult"])
-datasets = ['bikewale', 'clear_corpus', 'company_employees',
-       'employee-remuneration-and-expenses-earning-over-75000',
-       'employee_salary', 'goodreads', 'journal_jcr_cls', 'ramen_ratings',
-       'spotify', 'us_accidents_counts', 'us_accidents_severity',
-       'us_presidential', 'wine_review', 'zomato']
-new_datasets = ['prod',
- 'airbnb',
- 'channel',
- 'wine',
- 'imdb',
- 'jigsaw',
- 'fake',
- 'kick',
- 'ae',
- 'qaa',
- 'qaq',
- 'cloth',
- 'mercari',
- 'jc',
- 'pop',
- 'book',
- 'salary',
- 'house'
-]
-datasets = new_datasets + datasets
+# datasets = ['bikewale', 'clear_corpus', 'company_employees',
+#        'employee-remuneration-and-expenses-earning-over-75000',
+#        'employee_salary', 'goodreads', 'journal_jcr_cls', 'ramen_ratings',
+#        'spotify', 'us_accidents_counts', 'us_accidents_severity',
+#        'us_presidential', 'wine_review', 'zomato']
+# datasets = ['prod',
+#  'airbnb',
+#  'channel',
+#  'wine',
+#  'imdb',
+#  'jigsaw',
+#  'fake',
+#  'kick',
+#  'ae',
+#  'qaa',
+#  'qaq',
+#  'cloth',
+#  'mercari',
+#  'jc',
+#  'pop',
+#  'book',
+#  'salary',
+#  'house'
+# ]
+# datasets = new_datasets + datasets
 # datasets = ['wine_review',
 #  'prod',
 #  'airbnb',
@@ -60,6 +68,7 @@ datasets = new_datasets + datasets
 #  'qaq',
 #  'cloth',
 #  'salary']
+datasets = ["bikewale", "employee-remuneration-and-expenses-earning-over-75000"]
 #datasets = [f"companies_{year}" for year in range(2012, 2024)]
 
 #datasets = ["drug_directory", "met_objects"] #TODO
@@ -69,100 +78,71 @@ datasets = new_datasets + datasets
 #  'coffee_fix',
 #  'coffee_analysis',
 #  'ramen_ratings']
-
-#datasets = ["prod", "imdb", "ae", "mercari"]
-#datasets = ["prod", "mercari"]
-#datasets = ["book", "house"]
-#datasets = ["imdb", "ae"]
-# datasets = [
-#     "prod",
-#     "airbnb",
-#     "channel",
-#     "wine",
-#     "ae",
-#     "qaa",
-#     "qaq",
-#     "cloth",
-#     "mercari",
-#     "salary"
-# ]
-
-
 print(len(datasets))
 #datasets = ["agora"]
 
-def run_autogluon(X, y, cv, time_limit=180, presets="medium_quality", 
-                  hf_model="default"):
-    # Prepare the data for AutoGluon
-    data = pd.DataFrame(X)
-    data['target'] = y
+def run_carte(X, y, cv):
+    import sys
+    sys.path.append('/scratch/lgrinszt/carte')
+    from src_carte.carte_table_to_graph import Table2GraphTransformer
+    from src_carte.carte_estimator import CARTERegressor, CARTEClassifier
+    from configs.directory import config_directory
 
-    all_scores = []
+    # Define some parameters
+    fixed_params = dict()
+    fixed_params["num_model"] = 10 # 10 models for the bagging strategy
+    fixed_params["disable_pbar"] = False # True if you want cleanness
+    fixed_params["random_state"] = 0
+    fixed_params["device"] = "cpu"
+    fixed_params["n_jobs"] = 10
 
-    # Use cv to split the data and fit the model
-    for train_idx, test_idx in cv.split(data):
-        predictor = TabularPredictor(label='target')
-        train_data = data.iloc[train_idx]
-        test_data = data.iloc[test_idx]
-        hyperparameters = get_hyperparameter_config('multimodal')
-        if hf_model != "default":
-            hyperparameters["AG_AUTOMM"]["model.hf_text.checkpoint_name"] = hf_model
-        # Fit the model using the training data
-        predictor.fit(train_data=train_data, time_limit=time_limit, num_gpus=1,
-                      presets=presets,
-                      hyperparameters=hyperparameters)
-        
-        # Evaluate the model using the test data
-        performance = predictor.evaluate(test_data)
-        print("Model performance:", performance)
-        all_scores.append(performance)
+    accs = []
+    roc_aucs = []
+    balanced_accs = []
+    for train_idx, test_idx in cv.split(X):
+        preprocessor = Table2GraphTransformer()
+        X_train = X.iloc[train_idx]
+        y_train = y[train_idx]
+        X_test = X.iloc[test_idx]
+        y_test = y[test_idx]
+        X_train = preprocessor.fit_transform(X_train, y=y_train)
+        X_test = preprocessor.transform(X_test)
 
-    res = {}
-    metrics = performance.keys()
-    for metric in metrics:
-        res[metric] = [score[metric] for score in all_scores]
-    #res["roc_auc"] = [score["roc_auc"] for score in all_scores]
-    #res["accuracies"] = [score["accuracy"] for score in all_scores]
-    return res
-
-def run_autogluon_multimodal(X, y, cv, time_limit=180, presets="medium_quality",
-                            hf_model="default"):
-    # Prepare the data for AutoGluon
-    data = pd.DataFrame(X)
-    data['target'] = y
-
-    all_scores = []
-
-    # Use cv to split the data and fit the model
-    for train_idx, test_idx in cv.split(data):
-        predictor = MultiModalPredictor(label='target')
-        train_data = data.iloc[train_idx]
-        test_data = data.iloc[test_idx]
-        
-        # Fit the model using the training data
-        if hf_model == "default":
-            predictor.fit(train_data=train_data, time_limit=time_limit)
-        else:
-            predictor.fit(train_data=train_data, time_limit=time_limit,
-                          hyperparameters={"model.hf_text.checkpoint_name": hf_model})
-        
-        # Evaluate the model using the test data
         is_binary = len(np.unique(y)) == 2
-        if is_binary:
-            performance = predictor.evaluate(test_data, metrics=['acc', 'f1', 'roc_auc', "balanced_accuracy"])
-        else:
-            performance = predictor.evaluate(test_data, metrics=['acc', "balanced_accuracy"])
-        print("Model performance:", performance)
-        all_scores.append(performance)
 
+        # Define the estimator and run fit/predict
+        estimator = CARTEClassifier(**fixed_params,
+        loss="binary_crossentropy" if is_binary else "categorical_crossentropy") # CARTERegressor for Regression
+        estimator.fit(X=X_train, y=y_train)
+        y_pred_proba = estimator.predict_proba(X_test)
+        y_pred = y_pred_proba > 0.5
+
+        # Obtain the r2 score on predictions
+        try:
+            score = roc_auc_score(y_test, y_pred_proba)
+            print(f"\nThe AUROC for CARTE:", "{:.4f}".format(score))
+            roc_aucs.append(score)
+        except Exception as e:
+            print(f"Error computing AUROC: {e}")
+            roc_aucs.append(None)
+
+        acc = accuracy_score(y_test, y_pred)
+        print(f"\nThe accuracy for CARTE:", "{:.4f}".format(acc))
+        accs.append(acc)
+
+        balanced_acc = balanced_accuracy_score(y_test, y_pred)
+        print(f"\nThe balanced accuracy for CARTE:", "{:.4f}".format(balanced_acc))
+        balanced_accs.append(balanced_acc)
+
+    print(f"\nThe mean accuracy for CARTE:", "{:.4f}".format(np.mean(accs)))
+    print(f"\nThe mean balanced accuracy for CARTE:", "{:.4f}".format(np.mean(balanced_accs)))
     res = {}
-    metrics = performance.keys()
-    for metric in metrics:
-        res[metric] = [score[metric] for score in all_scores]
-    #res["roc_auc"] = [score["roc_auc"] for score in all_scores]
-    #res["accuracies"] = [score["accuracy"] for score in all_scores]
+    if roc_aucs and roc_aucs[0] is not None:
+        res["roc_auc"] = roc_aucs
+    res["accuracy"] = accs
+    res["balanced_accuracy"] = balanced_accs
+    print("returning ", res)
     return res
-
 
 
 
@@ -173,24 +153,18 @@ def run_autogluon_multimodal(X, y, cv, time_limit=180, presets="medium_quality",
 
 def pipeline(config):#dataset, encoding, n_test, dim_reduction_name, model_name, n_train, features
     print(config)
-    dataset, n_test, n_train, features, time_limit, preset, hf_model = config
+    dataset, n_test, n_train, features = config
     
-
     X, y = load_data(dataset, max_rows=10000)
     if len(X) < n_train + n_test:
         return (n_train, features, None)
     cv = FixedSizeSplit(n_splits=7, n_train=n_train, n_test=n_test, random_state=42)
     if features == "all":
-        res_scores = run_autogluon(X, y, cv, time_limit, preset, hf_model)
-        #res_scores = run_autogluon_multimodal(X, y, cv, time_limit, preset, hf_model)
+        res_scores = run_carte(X, y, cv)
         res_scores["n_train"] = n_train
         res_scores["n_test"] = n_test
         res_scores["features"] = features
         res_scores["dataset"] = dataset
-        res_scores["time_limit"] = time_limit
-        res_scores["preset"] = preset
-        res_scores["hf_model"] = hf_model
-        res_scores["encoding"] = "autogluon"
         return (n_train, features, res_scores)
     elif features == "text_only":
         raise Exception("Not implemented")
@@ -199,31 +173,25 @@ def pipeline(config):#dataset, encoding, n_test, dim_reduction_name, model_name,
         raise Exception("Not implemented")
         #return (n_train, features, run_on_encoded_data(None, X_rest, y, dim_reduction_name, dim_reduction, model_name, model, encoding, cv, dataset=dataset, features=features))
 
-n_trains = [1000, 3000, 5000]
-#n_trains = [3000, 4000, 5000]
-time_limit = [3 * 60]
-presets = ["medium_quality"]
+n_trains = [64, 128, 256, 1000, 2000, 3000, 4000, 5000]#[500, 1000, 2000, 3000]#, 4000, 5000]
 features_list = ["all"]#, "rest_only"]
-hf_models = ["intfloat/e5-large-v2"]
 n_test = 500
 
 # Generate all combinations of parameters
-param_combinations = list(product(datasets, [n_test], n_trains, features_list, time_limit, presets, hf_models))
+param_combinations = list(product(datasets, [n_test], n_trains, features_list))
 
 # Chunk your jobs
 CHUNK_SIZE = 500  # Choose a suitable chunk size
 chunks = [param_combinations[i:i + CHUNK_SIZE] for i in range(0, len(param_combinations), CHUNK_SIZE)]
 
-array_parallelism_total = 4
+array_parallelism_total = 50
 array_parallelism = array_parallelism_total // len(chunks)
 print(f"Using {array_parallelism} array parallelism")
 
 jobs = []
 
 executor = submitit.AutoExecutor(folder="logs")
-executor.update_parameters(timeout_min=2000, slurm_partition='parietal,gpu,gpu-best', slurm_array_parallelism=array_parallelism,# cpus_per_task=128,
-                           gpus_per_node=1,
-                           exclude="margpu002,margpu003,margpu004")#, mem_gb=128)
+executor.update_parameters(timeout_min=2000, slurm_partition='parietal,normal', slurm_array_parallelism=array_parallelism, cpus_per_task=16, mem_gb=64)
 # change name of job
 executor.update_parameters(name="pipeline")
 # Submit jobs chunk by chunk
@@ -242,10 +210,13 @@ for i, chunk in enumerate(chunks):
 
 # Define the columns of your dataframe
 # Open a file to write the results
-name = "test_longer_autogluon_02_09"
+name = "results_carte_01_09"
 for job in jobs:
     try:
+        print("retrieving result")
         result = job.result()
+        print("retrieved")
+        print(result)
         if result is not None:
             if result[2] is None:
                 continue
@@ -264,8 +235,7 @@ for job in jobs:
                 #df = df.explode(['accuracies', "roc_auc"])
                 # explode columns with scores
                 columns = list(df.columns)
-                columns_scores = [col for col in columns if col not in ["n_train", "n_test" "features", 
-                "dataset", "time_limit", "preset", "hf_model", "encoding"]]
+                columns_scores = [col for col in columns if col not in ["n_train", "n_test" "features", "dataset"]]
                 # check if the file exists
                 if not os.path.isfile(f"../results/{name}.csv"):
                     # Create a new file
@@ -275,3 +245,4 @@ for job in jobs:
                     df.to_csv(f"../results/{name}.csv", mode='a', header=False, index=False)
     except Exception as e:
         print(f"Job {job.job_id} failed with exception: {e}")
+

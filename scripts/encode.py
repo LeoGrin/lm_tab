@@ -6,9 +6,10 @@ from tqdm import tqdm
 
 #encodings = ["openai__", "skrub__minhash_30"]
 #encodings = ["skrub__minhash_10", "skrub__minhash_20", "skrub__minhash_30", "skrub__minhash_60", "skrub__minhash_100", "skrub__minhash_200"]
-encodings = ["skrub__minhash_300", "skrub__minhash_400", "skrub__minhash_500", "skrub__minhash_600"]
+#encodings = ["skrub__minhash_300", "skrub__minhash_400", "skrub__minhash_500", "skrub__minhash_600"]
 #encodings = ["fasttext__30"]
-#encodings = []
+#encodings = ["skrub__minhash_30"]
+encodings = ["openai__"]
 model_names = [
     # "EleutherAI/pythia-70m",
     # "EleutherAI/pythia-160m",
@@ -90,20 +91,39 @@ for model_name in model_names:
 
 print("encodings", encodings)
 
-datasets = ['bikewale', 'clear_corpus', 'company_employees',
-       'employee-remuneration-and-expenses-earning-over-75000',
-       'employee_salary', 'goodreads', 'journal_jcr_cls', 'ramen_ratings',
-       'spotify', 'us_accidents_counts', 'us_accidents_severity',
-       'us_presidential', 'wine_review', 'zomato']
+# datasets = ['bikewale', 'clear_corpus', 'company_employees',
+#        'employee-remuneration-and-expenses-earning-over-75000',
+#        'employee_salary', 'goodreads', 'journal_jcr_cls', 'ramen_ratings',
+#        'spotify', 'us_accidents_counts', 'us_accidents_severity',
+#        'us_presidential', 'wine_review', 'zomato']
+datasets = ['prod',
+ 'airbnb',
+ 'channel',
+ 'wine',
+ 'imdb',
+ 'jigsaw',
+ 'fake',
+ 'kick',
+ 'ae',
+ 'qaa',
+ 'qaq',
+ 'cloth',
+ 'mercari',
+ 'jc',
+ 'pop',
+ 'book',
+ 'salary',
+ 'house'
+ ]
 #datasets = [f"companies_{year}" for year in range(2012, 2024)]
 
 
 
 executor = submitit.AutoExecutor(folder="logs")
-executor.update_parameters(timeout_min=300, slurm_partition='parietal,normal,gpu',
-                           exclude="margpu001,margpu002,margpu003,margpu004",
-                           slurm_array_parallelism=150,
-                           cpus_per_task=4)
+executor.update_parameters(timeout_min=300, slurm_partition='parietal,normal,gpu,gpu-best',
+                           exclude="margpu001,margpu002,margpu003,margpu009",
+                           slurm_array_parallelism=10,
+                           cpus_per_task=2)
                            #gpus_per_node=1)
                            #slurm_additional_parameters={"nodelist": "margpu009"})
 
