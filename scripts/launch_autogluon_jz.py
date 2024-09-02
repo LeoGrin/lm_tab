@@ -19,12 +19,12 @@ import hashlib
 # datasets = ["journal_jcr_cls", "movies", "michelin", "spotify", "employee_salary", "museums", "fifa_footballplayers_22", "jp_anime", "clear_corpus", "company_employees", "us_presidential", "us_accidents_severity", "us_accidents_counts", "wine_review"]
 # datasets.extend(["building_permits", "public", "kickstarter", "colleges", "medical_charge", "traffic_violations"]) #  "agora"
 # datasets.extend(["bikewale", "goodreads", "zomato", "coffee_fix", "nfl_contract", "employee-remuneration-and-expenses-earning-over-75000", "coffee_analysis", "ramen_ratings", "beer_profile_and_ratings", "adult"])
-datasets = ['bikewale', 'clear_corpus', 'company_employees']
-    #    'employee-remuneration-and-expenses-earning-over-75000',
-    #    'employee_salary', 'goodreads', 'journal_jcr_cls', 'ramen_ratings',
-    #    'spotify', 'us_accidents_counts', 'us_accidents_severity',
-    #    'us_presidential', 'wine_review', 'zomato']
-new_datasets = ['prod',
+datasets = ['bikewale', 'clear_corpus', 'company_employees',
+       'employee-remuneration-and-expenses-earning-over-75000',
+       'employee_salary', 'goodreads', 'journal_jcr_cls', 'ramen_ratings',
+       'spotify', 'us_accidents_counts', 'us_accidents_severity',
+       'us_presidential', 'wine_review', 'zomato']
+#new_datasets = ['prod',
 #  'airbnb',
 #  'channel',
 #  'wine',
@@ -43,7 +43,7 @@ new_datasets = ['prod',
 #  'salary',
 #  'house'
 ]
-datasets = new_datasets + datasets
+#datasets = new_datasets + datasets
 # datasets = ['wine_review',
 #  'prod',
 #  'airbnb',
@@ -219,13 +219,13 @@ def pipeline(config):#dataset, encoding, n_test, dim_reduction_name, model_name,
         df.to_csv(f"{base_path}/{encoding}_{config_hash}.csv", mode='a', header=False, index=False)
 
 if __name__ == "__main__":
-    n_trains = [1000]
+    n_trains = [1000, 3000, 5000]
     #n_trains = [3000, 4000, 5000]
-    time_limit = [3 * 60]
+    time_limit = [15 * 60]
     presets = ["medium_quality"]
     features_list = ["all"]#, "rest_only"]
     hf_models = ["default"]
-    only_multimodal_list = [False]
+    only_multimodal_list = [False, True]
     n_test = 500
 
     # Generate all combinations of parameters
@@ -235,13 +235,13 @@ if __name__ == "__main__":
     CHUNK_SIZE = 500  # Choose a suitable chunk size
     chunks = [param_combinations[i:i + CHUNK_SIZE] for i in range(0, len(param_combinations), CHUNK_SIZE)]
 
-    array_parallelism_total = 4
+    array_parallelism_total = 100
     array_parallelism = array_parallelism_total // len(chunks)
     print(f"Using {array_parallelism} array parallelism")
 
     jobs = []
 
-    executor = setup_submitit_executor_a100("pipeline", gpus_per_node=1, cpus_per_task=8, time=10)
+    executor = setup_submitit_executor_a100("pipeline", gpus_per_node=1, cpus_per_task=8, time=10*60)
     # Submit jobs chunk by chunk
 
     for i, chunk in enumerate(chunks):
