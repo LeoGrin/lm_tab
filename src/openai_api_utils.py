@@ -161,7 +161,7 @@ class AnswerClassifier(BaseEstimator, ClassifierMixin):
         self.test_batch_size = test_batch_size
         self.n_ensembles = n_ensembles
         self.client = OpenAI(
-            api_key='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',#os.environ.get("OPENAI_API_KEY"),
+            api_key=os.environ.get("OPENAI_API_KEY"),
         )
         self.max_n_tries_ensemble = 5
 

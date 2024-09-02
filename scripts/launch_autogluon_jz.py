@@ -1,22 +1,14 @@
 from src.data_loading import load_data
-from skrub import MinHashEncoder
-from sklearn.decomposition import PCA
-from src.utils import FeaturesExtractor, FixedSizeSplit
-from sklearn.pipeline import Pipeline
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import cross_val_score
-from sklearn.metrics import accuracy_score
+from src.utils import FixedSizeSplit
 import pandas as pd
 import numpy as np
-from tqdm import tqdm
 import time
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import submitit
-from functools import partial
 from itertools import product
 import time
-from autogluon.tabular import TabularDataset, TabularPredictor
+from autogluon.tabular import TabularPredictor
 from autogluon.multimodal import MultiModalPredictor
 from autogluon.tabular.configs.hyperparameter_configs import get_hyperparameter_config
 from src.utils_jz import setup_submitit_executor_a100
