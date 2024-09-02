@@ -19,30 +19,30 @@ import hashlib
 # datasets = ["journal_jcr_cls", "movies", "michelin", "spotify", "employee_salary", "museums", "fifa_footballplayers_22", "jp_anime", "clear_corpus", "company_employees", "us_presidential", "us_accidents_severity", "us_accidents_counts", "wine_review"]
 # datasets.extend(["building_permits", "public", "kickstarter", "colleges", "medical_charge", "traffic_violations"]) #  "agora"
 # datasets.extend(["bikewale", "goodreads", "zomato", "coffee_fix", "nfl_contract", "employee-remuneration-and-expenses-earning-over-75000", "coffee_analysis", "ramen_ratings", "beer_profile_and_ratings", "adult"])
-# datasets = ['bikewale', 'clear_corpus', 'company_employees',
-#        'employee-remuneration-and-expenses-earning-over-75000',
-#        'employee_salary', 'goodreads', 'journal_jcr_cls', 'ramen_ratings',
-#        'spotify', 'us_accidents_counts', 'us_accidents_severity',
-#        'us_presidential', 'wine_review', 'zomato']
-datasets = ['prod',
- 'airbnb',
- 'channel',
- 'wine',
- 'imdb',
- 'jigsaw',
- 'fake',
- 'kick',
- 'ae',
- 'qaa',
- 'qaq',
- 'cloth',
- 'mercari',
- 'jc',
- 'pop',
- 'book',
- 'salary',
- 'house'
-]
+datasets = ['bikewale', 'clear_corpus', 'company_employees',
+       'employee-remuneration-and-expenses-earning-over-75000',
+       'employee_salary', 'goodreads', 'journal_jcr_cls', 'ramen_ratings',
+       'spotify', 'us_accidents_counts', 'us_accidents_severity',
+       'us_presidential', 'wine_review', 'zomato']
+# datasets = ['prod',
+#  'airbnb',
+#  'channel',
+#  'wine',
+#  'imdb',
+#  'jigsaw',
+#  'fake',
+#  'kick',
+#  'ae',
+#  'qaa',
+#  'qaq',
+#  'cloth',
+#  'mercari',
+#  'jc',
+#  'pop',
+#  'book',
+#  'salary',
+#  'house'
+# ]
 #datasets = new_datasets + datasets
 # datasets = ['wine_review',
 #  'prod',
@@ -224,7 +224,7 @@ if __name__ == "__main__":
     time_limit = [15 * 60]
     presets = ["medium_quality"]
     features_list = ["all"]#, "rest_only"]
-    hf_models = ["default", "intfloat/e5-large-v2"]
+    hf_models = ["intfloat/e5-large-v2"]
     only_multimodal_list = [False, True]
     n_test = 500
 
