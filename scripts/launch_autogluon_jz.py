@@ -225,10 +225,11 @@ if __name__ == "__main__":
     presets = ["medium_quality"]
     features_list = ["all"]#, "rest_only"]
     hf_models = ["default"]
+    only_multimodal_list = [False]
     n_test = 500
 
     # Generate all combinations of parameters
-    param_combinations = list(product(datasets, [n_test], n_trains, features_list, time_limit, presets, hf_models))
+    param_combinations = list(product(datasets, [n_test], n_trains, features_list, time_limit, presets, hf_models, only_multimodal_list))
 
     # Chunk your jobs
     CHUNK_SIZE = 500  # Choose a suitable chunk size
