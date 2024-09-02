@@ -167,13 +167,13 @@ def load_data_1_text(data_name, max_rows=None, include_all_columns=False, remove
 def load_data(data_name, max_rows=None, remove_missing=True, regression=False):
     rng = np.random.default_rng(42)
     # load the data
-    if data_name in skrub_functions.keys():
-        ds = skrub_functions[data_name]()
-        X, y = ds.X, ds.y
-    else:
-        df = pd.read_parquet("../data/{}.parquet".format(data_name)) #FIXME
-        X = df.drop("target", axis=1)
-        y = df["target"]
+    # if data_name in skrub_functions.keys():
+    #     ds = skrub_functions[data_name]()
+    #     X, y = ds.X, ds.y
+    # else:
+    df = pd.read_parquet("../data/{}.parquet".format(data_name)) #FIXME
+    X = df.drop("target", axis=1)
+    y = df["target"]
 
 
     # remove missing in y
@@ -199,7 +199,7 @@ def load_data(data_name, max_rows=None, remove_missing=True, regression=False):
         y = le.fit_transform(y)
         y = y.astype(np.int64) # for skorch
         if len(np.unique(y)) > 2:
-            print("More than 2 classes, converting to binary classification")
+            print("More than 2 classes") #, converting to binary classification")
 
     if regression:
         # convert y to numpy
