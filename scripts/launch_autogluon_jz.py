@@ -95,7 +95,8 @@ def run_autogluon(X, y, cv, time_limit=180, presets="medium_quality",
 
     # Use cv to split the data and fit the model
     for train_idx, test_idx in cv.split(data):
-        predictor = TabularPredictor(label='target')
+        predictor = TabularPredictor(label='target',
+                                     path=model_path)
         train_data = data.iloc[train_idx]
         test_data = data.iloc[test_idx]
         hyperparameters = get_hyperparameter_config('multimodal')
@@ -105,7 +106,6 @@ def run_autogluon(X, y, cv, time_limit=180, presets="medium_quality",
         predictor.fit(train_data=train_data, time_limit=time_limit, num_gpus=1,
                       num_cpus=8,
                       presets=presets,
-                      path=model_path,
                       hyperparameters=hyperparameters)
         
         # Evaluate the model using the test data
@@ -131,17 +131,16 @@ def run_autogluon_multimodal(X, y, cv, time_limit=180, presets="medium_quality",
 
     # Use cv to split the data and fit the model
     for train_idx, test_idx in cv.split(data):
-        predictor = MultiModalPredictor(label='target')
+        predictor = MultiModalPredictor(label='target',
+                                        path=model_path)
         train_data = data.iloc[train_idx]
         test_data = data.iloc[test_idx]
         
         # Fit the model using the training data
         if hf_model == "default":
-            predictor.fit(train_data=train_data, time_limit=time_limit,
-                          path=model_path)
+            predictor.fit(train_data=train_data, time_limit=time_limit)
         else:
             predictor.fit(train_data=train_data, time_limit=time_limit,
-                          path=model_path,
                           hyperparameters={"model.hf_text.checkpoint_name": hf_model})
         
         # Evaluate the model using the test data
